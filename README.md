@@ -2,6 +2,9 @@
 
 Infer relative RNA dosage and candidate clones from single-cell and spatial RNA-seq.
 
+Motivation: understand why colorectal cancer patients with an IGF2 tandem duplication
+have more genome-wide copy-number gains, and how those gains relate to tumour clones.
+
 - Detect genomic regions with increased or decreased expression relative to reference cells.
 - Group cells into clones and subclones with shared dosage patterns.
 - Add phased SNP counts to detect allelic imbalance, including candidate copy-neutral LOH.
