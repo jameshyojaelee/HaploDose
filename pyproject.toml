@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "haplodose"
+version = "0.1.0"
+description = "Haplotype-aware RNA dosage: copy-number clones from single-cell and spatial transcriptomes"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=2",
+    "scipy>=1.13",
+    "pandas>=2",
+    "h5py>=3.10",
+    "jax>=0.10",
+    "scanpy>=1.10",
+    "leidenalg>=0.10",
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+cuda12 = ["jax[cuda12]>=0.10"]
+test = ["pytest>=8"]
+
+[project.scripts]
+haplodose = "haplodose.cli:main"
+
+[tool.maturin]
+python-source = "python"
+module-name = "haplodose._core"
+manifest-path = "crates/core/Cargo.toml"
+features = ["extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

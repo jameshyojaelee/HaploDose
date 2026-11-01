@@ -1,0 +1,22 @@
+# Generated analysis outputs and scheduler logs
+/results/
+/logs/
+
+# Python caches, environments, and build products
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+/build/
+/dist/
+*.so
+*.whl
+
+# Rust build products
+target/
+
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
