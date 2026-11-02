@@ -51,6 +51,110 @@ RNA-seq provides a secondary evaluation. The package and manuscript scope remain
 general-purpose; the CRC/IGF2 motivation is a research question, not an established
 mechanism.
 
+## Prespecified SOTA target claims (user decision, 2026-11-02, recorded before any held-out output existed)
+
+User goal: HaploDose is to be state of the art in at least three key benchmarks. To keep that claim testable,
+the claims are fixed here before results are seen; each is reported whatever the outcome, losses included.
+A claim holds only if its decision rule is met on data not used to develop the method.
+
+1. **Profile accuracy vs published tools.** MIX-seq held-out E1 (`docs/heldout_protocol.md`): HaploDose
+   `log_ratio_gene` vs infercnvpy, R inferCNV, CopyKAT, SCEVAN; superior to a tool if Holm p < 0.05 (family of 5,
+   including pseudobulk) and the 95% CI is above 0. SOTA = superior to all four published tools. Pseudobulk is a
+   baseline, reported alongside, not a tool. Tightened by protocol amendment 5 (before any held-out job started):
+   also requires the common-gene-universe E1 sensitivity to give a CI above 0 against each published tool;
+   `superior` is stated as conditional on independence of lines (lines share 6 reference sets).
+2. **Peak memory at scale.** Controlled scaling benchmark rerun on the frozen version (14:24 freeze code; the
+   08:19 run used earlier code): same cells, one node generation, 16 CPUs, 3 repeats where feasible. SOTA = lowest
+   median peak memory among all tools that finish, at every size from 20k cells up. Wall time reported alongside
+   (infercnvpy is currently about 10x faster; no runtime claim is made).
+3. **Focal (sub-arm) loss detection in bulk RNA.** Independent set: CCLE bulk RNA vs DepMap CN (about 1,000
+   lines; not used in development). Endpoint as TCGA `subarm.py` at a matched 5% false-positive rate; HaploDose
+   bulk vs naive gene ratio and infercnvpy, paired over lines, Holm over the comparisons. Open design point, to be
+   fixed before any run: the normal panel for bulk mode (CCLE has no matched normals).
+   **Fixed 2026-11-02 (user decision, before any CCLE data was downloaded):** normal panel = GTEx v10 tissue-
+   matched normals (RNA-SeQC 2.4.2 gene reads, the same quantifier as DepMap 24Q4
+   `OmicsExpressionRNASeQCGeneCountProfile.csv`); each CCLE lineage gets the GTEx tissue(s) of its organ; lineages
+   with no GTEx match are excluded; the same panel for all three methods. Truth: DepMap 24Q4
+   `OmicsAbsoluteCNSegmentsProfile.csv` (ABSOLUTE TCN and ploidy, the TCGA `subarm.py` truth type). Unit = line
+   (default model profile). Primary: focal-loss recall at 5% realised FPR on DNA-neutral windows, HaploDose dose
+   vs naive and vs infercnvpy, paired Wilcoxon over lines with >= 1 focal-loss window, Holm over these 2.
+   SOTA = both Holm < 0.05 with HaploDose higher. Lines whose DepMap CN was used as truth in development (Kinker,
+   MIX-seq) are kept (their bulk RNA was never used) and reported as a sensitivity subset. The lineage-to-tissue
+   map and the frozen code are written to the run directory before scoring. Caveat known in advance: tissue
+   normals contain stroma and immune cells that cultured lines lack.
+4. **Subclone recovery.** After v-next (count-splitting proposals, calibrated split null), frozen, then evaluated
+   once on a second unopened held-out set that has reads, so Numbat (and, if feasible, XClone and CalicoST) can be
+   included. Endpoint ari_all as E2; SOTA = superior to every comparator, Holm over the comparisons, CI above 0.
+   Development evidence today is a tie (Kinker 0.167 vs infercnvpy 0.165).
+
+   **Data fixed 2026-11-02 (user decision, before any download):** primary = MSK SPECTRUM ovarian (tumour scRNA
+   reads GSE180661/SRP329496; DLP+ scDNA clones Synapse syn66366960; clone truth is profile-matched, as Andor);
+   secondary, cell-level = Bian 2018 CRC scTrio (GSE97693, same-cell DNA+RNA; DNA CN re-derived). Both stay
+   unopened (download and read QC only) until v-next is frozen.
+   **Endpoint amended 2026-11-02, before any download** (dataset survey, `dev/dataset_survey_20261102/survey.md`):
+   `ari_all` needs a truth clone per RNA cell, which SPECTRUM cannot give (DNA and RNA from different cells;
+   mapping RNA cells to DNA clones would be circular). SPECTRUM primary endpoint = per-patient clone-difference
+   AUROC as in `benchmarks/andor/score.py` item 2: truth per arm = 1 if any two DLP+ tumour clones differ on
+   >= 30% of the arm's bins by >= 1 copy; tool score per arm = largest |difference| between any two of its RNA
+   tumour clones (clones of the cells the tool calls malignant, >= max(20, 2%) cells). Patients: tumour scRNA
+   from an unsorted or CD45-negative sample and >= 2 DLP+ tumour clones with >= 1 differing arm (clone counts
+   and arm flags only; fixed from the Synapse clone tables before any RNA tool runs). Test: paired Wilcoxon over
+   patients, HaploDose v-next vs each comparator that runs (Numbat, infercnvpy, CopyKAT, SCEVAN; XClone and
+   CalicoST if feasible), Holm over those; SOTA = every Holm p < 0.05 with bootstrap 95% CI of the mean
+   difference above 0. Secondary, descriptive: precision/recall of called differences, RNA vs DNA clone counts.
+   The SPECTRUM scorer is written and hashed on Andor development data before any SPECTRUM RNA output is read.
+   Bian scTrio: `ari_all` against same-cell DNA clone labels (DNA clusters from the re-derived CN), descriptive.
+   Claim 3 amendment (same day, before the score stage ran): descriptive per-protocol (Stranded) sensitivity
+   added (`results/ccle_bulk_20261102_1551/README.md`).
+   **Claim 3 result (read once, 2026-11-02, frozen 14:24 code, `results/ccle_bulk_20261102_1551/score/primary.json`):
+   holds by the prespecified rule.** n = 822 lines with >= 1 focal-loss window (unit = line; 18 lineage groups).
+   Focal-loss recall at 5% FPR, mean: HaploDose 0.509, naive 0.484, infercnvpy 0.423. Paired Wilcoxon, Holm over
+   2: vs naive diff +0.024, Holm p = 0.0032, bootstrap 95% CI -0.001 to 0.049 (crosses 0; descriptive); vs
+   infercnvpy diff +0.085, Holm p < 1e-10, CI 0.062 to 0.108. Excluding development lines (n = 646): same
+   direction, vs naive Holm p = 0.011, CI -0.005 to 0.053. Stranded sensitivity (descriptive): unstranded lines
+   HaploDose ahead of both (Holm p < 0.001); stranded lines no advantage over naive (diff -0.023, Holm p = 0.69).
+   Report the margin over naive as small and protocol-dependent.
+5. **Outside benchmark (Schmid et al. 2025, Nat Commun 16:8777; added 2026-11-02 by user decision, before any
+   run).** Frozen HaploDose run through the authors' pipeline (github.com/colomemaria/benchmark_scrnaseq_cnv_callers,
+   truth Zenodo 20260649) next to their six tools (inferCNV, copyKat, SCEVAN, CONICSmat, CaSpER, Numbat), all
+   rerun by us in their pipeline. Primary set = datasets never used in our development: COLO320-HSR, BCC06,
+   BCC06post, MM199 (n = 4). Line-overlap set, reported separately: A375 and MCF7 (Kinker lines), HCT116
+   (GSE149224). The 9 Andor gastric lines and the mouse set are excluded (development; mouse unsupported).
+   Metrics = the paper's Pearson correlation and gain/loss AUC per dataset. With n = 4, no test can pass Holm,
+   so the rule is descriptive: SOTA = best mean rank over the 4 datasets on both metrics, against all six tools.
+   Reported whatever the outcome.
+
+Known risks: Numbat is ranked first in recent benchmarks (Chang 2026, Song 2025) and is absent from MIX-seq;
+TCGA arm level is currently a loss to the naive gene ratio (not a target claim).
+
+## Takeover review, 2026-11-02 ~15:30 (supersedes "Current state" below where they differ)
+
+One session now owns the whole repo (HaploDose1/2 lanes in `docs/HANDOFF_2026-11-02.md` no longer apply). Plan:
+`~/.claude/plans/review-docs-handoff-2026-11-02-md-and-ta-robust-pascal.md`.
+- **Held-out run repaired before it started** (protocol amendment 4). The 14:24 job scripts would have failed: the
+  comparator run glob matched their own stderr files, so `evaluate.py` and the `afterok` analysis would never have
+  run, and any tool failure crashed the pipeline instead of scoring NaN/0. Comparator jobs 22611772-75, 22611777-80 and analysis
+  22611794 were cancelled while pending (no held-out output exists; Haplodose jobs 22611771/76 kept, unaffected) and
+  are resubmitted with the fixed `benchmarks/heldout/run_tool.sbatch`,
+  `analyse.py` and `results/heldout_20261102_1424/analyse_v2.sbatch`. Pre-run check on Kinker pools 16/18:
+  `dev/heldout_fixcheck_20261102_1528/` (job 22612248). Frozen Haplodose code is unchanged (all 41 hashes match).
+- **The float64 v4/v6 experiment cannot answer its question.** Every JAX entry point casts to float32
+  (`kernels/likelihood.py:41-43`, `kernels/hmm.py:139-150`, `profile.py:84-87`, `kernels/estep.py`), so
+  `JAX_ENABLE_X64=1` changes nothing there. v4 with x64 still fails the Potts test (22611904/05). Reading
+  [Inference]: the fixture sits on hard thresholds (posterior 0.95, split score > 0, Jaccard 0.7) and BLAS/XLA
+  rounding tips it. Node dependence is to be measured (seed and subsample refits) and stated as a limitation.
+- **Stale numbers to rerun on frozen code**: the U-CAN bulk table predates the leave-one-out normals fix and was
+  not rerun. Gambardella 2022 (GSE173634) is no longer the second held-out set: rejected (lines from different
+  donors, bulk truth only); claim 4 uses SPECTRUM and Bian 2018. Manuscript outline: `docs/manuscript_outline.md`.
+- **Test count**: 52 test functions, 61 cases with parametrisation, plus 3 Rust tests. The "70/70" in the handoff
+  and "61" here count differently; quote 61 Python cases. README is not edited (standing rule) and is stale.
+- **Evidence state**: every number in this file is development evidence. Gaps that bear most on the manuscript:
+  no calibrated false-split rate on data with no true subclone; cell-level clone validation only on Andor SNU-601
+  (n = 1, scored on 00:42 code, not the frozen 14:24 version); no diploid-normal reference in any scRNA benchmark;
+  allele mode validated against DNA only in bulk. TCGA arm level is a negative result (naive gene ratio 0.670 vs
+  Haplodose 0.637 median per-tumour rho). Canonical Kinker single-line figure: gene column 0.861 (field run
+  2026-11-02 05:29, Holm over 5); the 0.863 elsewhere is the 2026-11-01 decomposition run.
+
 ## Current state (read this first)
 
 - **2026-11-02: 61 Python tests pass on v6 (jobs 22601385, 22601594; 3 Rust in 22601012); Potts fails on v4** (node-dependent,
@@ -319,6 +423,8 @@ proposal separates the subclones barely above chance, `dev/hd1_potts_20261101_22
 the outcome flips with CPU float differences. Open. A/B noise: identical code on v4 vs v5 differed by 0.004 ARI
 (HaploDose2); `--constraint` on the sbatch line does not override `--prefer` in the script, so pin in the script.
 
+Tried, not adopted: variant G (`dev/hd1_ablate_20261101_2350/G`), event proposals scanned on every bin and accepted when the region's mixture gain beat the largest gain of its kind in 19 bin-order permutations (per-bin dispersion and cross-gene programme correlation kept, adjacency destroyed); accepted regions treated as known differences in shared doses and merges. Kinker v3, v4: ARI 0.158 vs C 0.167 (56/63, p 0.27); at/above floor 0.181 vs 0.192, below 0.050 vs 0.051; single-line gene rho 0.861, one-clone lines 71; passes the programme test; 17x slower (6 h vs 21 min). Together with E and F, three acceptance or ranking schemes on top of the current proposals did not improve small-event recovery.
+
 Proposal floor (#5). Field rescore by floor stratum (HaploDose2): at/above 30 implanted cells (137) Haplodose
 0.192 vs infercnvpy 0.180 ARI; below (29) 0.051 vs 0.093, so the gap to infercnvpy is in the below-floor
 specimens. `--min-cells` experiment on repo code (clones H, v4, `dev/hd1_ablate_20261101_2350/out_R1_*_mc{15,20}`):
@@ -369,7 +475,7 @@ Haplodose and infercnvpy only; every run on cpu,
 `--constraint=v6`, 16 CPUs, 72 h cap, 200G memory cap (SCEVAN 5k and 20k first ran with 32G / 96G and ran out of
 memory; rerun at 200G as repeats 11-13). Wall time from /usr/bin/time -v; peak memory = max(sacct MaxRSS of the
 batch step, /usr/bin/time), since /usr/bin/time misses forked R workers and sacct samples every 30 s. Haplodose
-code frozen in `code/` (08:19). Jobs in `jobs.txt`.
+code frozen in `code/` (08:19). Jobs in `jobs.txt`. Results so far (`summary.tsv`, median of repeats, wall min / peak GiB): Haplodose 5k 0.4 / 1.9, 20k 1.8 / 2.4, 50k 3.7 / 3.3, 100k 6.2 / 4.1, 1M 46 / 10.3; infercnvpy 0.4 / 1.3, 0.4 / 2.4, 0.5 / 4.7, 1.3 / 11.1, 1M 4.5 / 104; R inferCNV 2.7 / 4.1, 14 / 11.7, 66 / 28.9, 100k 245 / 64; CopyKAT 5k 12 / 14.7, 20k 114 / 65 (50k, 100k running); SCEVAN 5k 9.6 / 31, 20k 54 / 128, 50k and 100k out of memory at 200 GB. infercnvpy is ~10x faster than Haplodose at every size; Haplodose has the lowest peak memory from 20k up (1M: 10 vs 104 GiB). Panels: `results/figures_headline_20261102_1438/E{1,2}_scaling_*.pdf`.
 
 Field comparators (env `cnv_field`, `slurm/build_cnv_field.sbatch`: CopyKAT 1.2.5 @01924c0, SCEVAN 1.0.3
 @5a49b88, R 4.4; runner `benchmarks/comparators/run_r_field.py`, `benchmarks/kinker/run_field.sbatch`). Both use
@@ -515,7 +621,7 @@ H.2 and H.3 appended to `~/CRC/docs/notes/2026-10-30_meeting_followups.md`.
    - Phase-switch probability (1 − e^(−2νd))/2 with d in cM; ν and the beta-binomial
      κ are chosen by likelihood.
    - SNPs biased in same-patient reference cells are dropped.
-   - Joint states per segment, including cnLOH.
+   - Joint states per segment, including `neutral_allele_imbalanced` (a cnLOH candidate, not a cnLOH call).
 7. **Spatial.**
    - Potts prior over an 8-nearest-neighbour graph, mean-field.
    - λ chosen by how well neighbours' data-only posteriors predict each cell's own data.

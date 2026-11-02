@@ -4,11 +4,11 @@
 # arithmetic on the saved per-specimen values). Tests, n and corrections go in captions.md, not on the panels.
 #
 # Inputs (paths relative to the repo root, ~/Haplodose):
-#   A  results/kinker_field_20261102_0529/single_line/rho_by_line.tsv   per-line arm Spearman rho vs DepMap
-#      results/kinker_field_20261102_0529/single_line/summary.json      medians, paired Wilcoxon, Holm
-#   B  results/kinker_field_20261102_0529/implant/per_specimen.tsv      ARI per line and tool
-#      results/kinker_field_20261102_0529/implant/by_setting.tsv        mean ARI per setting and tool
-#      results/kinker_field_20261102_0529/implant/summary.json          paired Wilcoxon, Holm over tool pairs
+#   A  results/kinker_field_20261102_0529/single_line_ci/rho_by_line.tsv   per-line arm Spearman rho vs DepMap
+#      results/kinker_field_20261102_0529/single_line_ci/summary.json      medians, paired Wilcoxon, Holm, CIs
+#   B  results/kinker_field_20261102_0529/implant_all5/per_specimen.tsv    ari_all per line and tool (5 tools)
+#      results/kinker_field_20261102_0529/implant_all5/summary.json        paired Wilcoxon, Holm over tool pairs
+#   E  results/scaling_20261102_0819/runs.tsv                              wall time and peak memory per run
 #   C  dev/hd1_proposals_20261102_0600/oracle.tsv                        oracle ARI per line, all region genes
 #      dev/hd1_proposals_20261102_0600/oracle_even.tsv                   oracle ARI, Haplodose proposal genes only
 #   D  results/andor_rerun_20261102_0042/scores/SNU-601/haplodose/scores.tsv          Haplodose (headline)
@@ -59,7 +59,7 @@ lab_of <- setNames(tools$label, tools$id)
 
 # ---- A. Kinker single-line profiles vs DepMap DNA ----------------------------------------------------------
 # KEY MESSAGE: Haplodose profiles agree with DNA nearly as well as pseudobulk and better than infercnvpy, CopyKAT, SCEVAN.
-rho <- fread(file.path(K, "single_line/rho_by_line.tsv"))
+rho <- fread(file.path(K, "single_line_ci/rho_by_line.tsv"))
 a <- melt(rho, id.vars = "specimen", variable.name = "id", value.name = "rho")
 a[, tool := lab_of[as.character(id)]]
 ord <- a[, .(m = median(rho)), by = tool][order(m), tool]
@@ -89,14 +89,16 @@ save_pdf(p, "A2_kinker_singleline_paired_diff.pdf", w = 2.4, h = 1.3,
 
 # ---- B. Kinker subclone recovery -------------------------------------------------------------------------
 # KEY MESSAGE: all tools recover implanted subclones only for large events; Haplodose and infercnvpy lead.
-ps <- fread(file.path(K, "implant/per_specimen.tsv"))
-ps[, tool := factor(lab_of[tool], levels = c("Haplodose", "infercnvpy", "CopyKAT", "SCEVAN"))]
+ps <- fread(file.path(K, "implant_all5/per_specimen.tsv"))
+ps[, ari := ari_all]                                  # failure-aware ARI; equals ari here (coverage 1 for every tool)
+ps[, tool := factor(lab_of[tool], levels = c("Haplodose", "infercnvpy", "inferCNV (R)", "CopyKAT", "SCEVAN"))]
 ps[, size := factor(size, levels = c(50, 150, 500))]
 ps[, direction := factor(direction, levels = c("gain", "loss"), labels = c("Gain", "Loss"))]
 ps[, fraction := factor(fraction, levels = c(0.15, 0.4), labels = c("15% of cells", "40% of cells"))]
 bs <- ps[, .(mean_ari = mean(ari), n = .N), by = .(tool, size, direction, fraction)]
-chk <- fread(file.path(K, "implant/by_setting.tsv"))
-stopifnot(isTRUE(all.equal(sort(bs$mean_ari), sort(chk$mean_ari))))  # same means as the saved table
+chk <- fromJSON(file.path(K, "implant_all5/summary.json"))$overall
+stopifnot(all(abs(ps[, mean(ari), by = tool][order(tool), V1] -
+                  sapply(as.character(sort(unique(ps$tool))), function(t) chk[[names(lab_of)[lab_of == t]]]$mean_ari_all)) < 1e-9))
 dodge <- position_dodge(width = 0.7)
 p <- ggplot(ps, aes(size, ari, color = tool, shape = tool, group = tool)) +
   geom_hline(yintercept = 0, linewidth = 0.2, color = "#9E9E9E") +
@@ -138,7 +140,7 @@ p <- ggplot(bs, aes(mean_ari, row)) +
   scale_color_manual(values = c(col_of, "Oracle, all genes" = "#252525", "Oracle, proposal genes" = gray_gradient[8]),
                      breaks = c(levels(ps$tool), levels(ol$ref))) +
   scale_shape_manual(values = shp_of, guide = "none") +
-  guides(color = guide_legend(override.aes = list(shape = c(shp_of[levels(ps$tool)], 124, 124), size = c(1, 1, 1, 1, 2.6, 2.6)), ncol = 1)) +
+  guides(color = guide_legend(override.aes = list(shape = c(shp_of[levels(ps$tool)], 124, 124), size = c(rep(1, nlevels(ps$tool)), 2.6, 2.6)), ncol = 1)) +
   scale_x_continuous(limits = c(-0.02, 1), breaks = c(0, 0.5, 1)) +
   labs(x = "Mean ARI", y = NULL) + theme_hd() + theme(legend.position = "right")
 save_pdf(p, "C_kinker_subclone_headroom.pdf", w = 3.0, h = 1.9,
@@ -176,12 +178,36 @@ p <- ggplot(pt, aes(value, tool, color = tool, shape = tool)) +
   labs(x = "Clone-differing arms", y = NULL) + theme_hd() + theme(panel.spacing = unit(6, "pt"))
 save_pdf(p, "D_andor_snu601_arms.pdf", w = 3.0, h = 1.1, data = sc)
 
+# ---- E. Compute scaling: same cells, hardware and CPUs for every tool ---------------------------------------
+# KEY MESSAGE: Haplodose memory stays near 10 GiB at 1M cells; CopyKAT, SCEVAN and R inferCNV do not reach 100k.
+S <- "results/scaling_20261102_0819"
+sr <- fread(file.path(S, "runs.tsv"))
+sr[, done := state == "COMPLETED" & exit == 0]
+sr[, tool := factor(lab_of[tool], levels = c("Haplodose", "infercnvpy", "inferCNV (R)", "CopyKAT", "SCEVAN"))]
+ok <- sr[done == TRUE]
+sm <- ok[, .(wall_min = median(wall_s) / 60, peak_gib = median(peak_rss_gib), n = .N), by = .(tool, cells)]
+for (m in c("wall_min", "peak_gib")) {
+  pts <- copy(ok)[, y := if (m == "wall_min") wall_s / 60 else peak_rss_gib]
+  p <- ggplot(sm, aes(cells, get(m), color = tool, shape = tool)) +
+    geom_line(linewidth = 0.35) +
+    geom_point(data = pts, aes(cells, y), size = 0.6, stroke = 0.3, alpha = 0.7) +
+    scale_x_log10(breaks = c(5e3, 2e4, 5e4, 1e5, 1e6), labels = c("5k", "20k", "50k", "100k", "1M")) +
+    scale_y_log10() +
+    scale_color_manual(values = col_of) + scale_shape_manual(values = shp_of) +
+    labs(x = "Cells", y = if (m == "wall_min") "Wall time (min)" else "Peak memory (GiB)") +
+    theme_hd() + theme(legend.position = if (m == "wall_min") "right" else "none")
+  save_pdf(p, sprintf("E%d_scaling_%s.pdf", if (m == "wall_min") 1 else 2, if (m == "wall_min") "time" else "memory"),
+           w = if (m == "wall_min") 2.4 else 1.7, h = 1.5, data = sm)
+}
+nf <- sr[done == FALSE, .(tool, cells, rep, state)]
+
 # ---- captions.md: n, unit, test and correction, from the saved summaries ------------------------------------
-sj <- fromJSON(file.path(K, "single_line/summary.json"))
+sj <- fromJSON(file.path(K, "single_line_ci/summary.json"))
 pt1 <- as.data.table(sj$paired_tests)
 fmt_p <- function(x) formatC(x, format = "g", digits = 2)
-lineA <- pt1[, sprintf("%s %d/%d lines higher for Haplodose, Holm p %s", lab_of[b], a_higher, n, fmt_p(p_holm))]
-ij <- fromJSON(file.path(K, "implant/summary.json"))
+lineA <- pt1[, sprintf("%s %d/%d lines higher for Haplodose, median difference %.3f (95%% bootstrap CI %.3f to %.3f, lines resampled), Holm p %s",
+                       lab_of[b], a_higher, n, median_diff, sapply(ci95, `[`, 1), sapply(ci95, `[`, 2), fmt_p(p_holm))]
+ij <- fromJSON(file.path(K, "implant_all5/summary.json"))
 pt2 <- as.data.table(ij$paired_tests)
 lineB <- pt2[, sprintf("%s vs %s mean ARI %.3f vs %.3f, Holm p %s", lab_of[a], lab_of[b], mean_a, mean_b, fmt_p(p_holm))]
 hd <- sc[run == "haplodose"]
@@ -189,20 +215,23 @@ cap_txt <- c(
   "# Headline figure captions", "",
   sprintf("Produced by `benchmarks/figures/headline_figures.R` (seed 20261102). All text 6 pt Helvetica, PDF via cairo_pdf, useDingbats = FALSE. Each panel has a `_source.tsv` with the plotted values."), "",
   "## A1_kinker_singleline_rho.pdf",
-  sprintf("Kinker 2020 cell lines profiled one at a time (n = %d lines; unit = cell line). Each point is one line's Spearman rho between the tool's arm-level copy-number profile and DepMap DNA arm copy number; box = median and IQR. Haplodose = gene-level log ratio; Haplodose bins = summed-count bins; pseudobulk = simple baseline. Medians: %s. Source: `%s/single_line/rho_by_line.tsv`, `summary.json`.",
+  sprintf("Kinker 2020 cell lines profiled one at a time (n = %d lines; unit = cell line). Each point is one line's Spearman rho between the tool's arm-level copy-number profile and DepMap DNA arm copy number; box = median and IQR. Haplodose = gene-level log ratio; pseudobulk = simple baseline. Development benchmark (Kinker was used to choose model changes). Medians: %s. Source: `%s/single_line_ci/rho_by_line.tsv`, `summary.json`.",
           sj$n_lines, paste(sprintf("%s %.3f", lab_of[names(sj$median_rho)], unlist(sj$median_rho)), collapse = ", "), K), "",
   "## A2_kinker_singleline_paired_diff.pdf",
   sprintf("Per-line difference in rho, Haplodose minus each tool (points right of 0: Haplodose closer to DNA); black tick = median. Paired two-sided Wilcoxon signed-rank per pair, Holm over the 5 pairs with Haplodose, unit = cell line (n = %d): %s. Source: as A1.", sj$n_lines, paste(lineA, collapse = "; ")), "",
   "## B_kinker_subclone_ari.pdf",
-  sprintf("Implanted subclonal copy-number events (50, 150 or 500 genes; gain or loss; in 15%% or 40%% of a line's cells), one setting per line (n = %d lines, %d-%d per setting). Small points = adjusted Rand index between a tool's clones and the implanted cells, one per line; large points and lines = setting mean. Overall paired two-sided Wilcoxon, Holm over all 6 tool pairs, unit = cell line: %s. Per-setting differences were not tested. Source: `%s/implant/per_specimen.tsv`, `by_setting.tsv`, `summary.json`.",
+  sprintf("Implanted subclonal copy-number events (50, 150 or 500 genes; gain or loss; in 15%% or 40%% of a line's cells), one setting per line (n = %d lines, %d-%d per setting). Small points = adjusted Rand index between a tool's clones and the implanted cells, one per line; large points and lines = setting mean. ARI = failure-aware ari_all (unassigned cells one extra label; coverage was 1 for every tool). Overall paired two-sided Wilcoxon, Holm over all 10 tool pairs, unit = cell line: %s. Per-setting differences were not tested. Development benchmark. Source: `%s/implant_all5/per_specimen.tsv`, `summary.json`.",
           ij$n_specimens, min(bs$n), max(bs$n), paste(lineB, collapse = "; "), K), "",
   "## C_kinker_subclone_headroom.pdf",
-  sprintf("Mean ARI per setting for each tool (points, as B) against an oracle that is told the implanted region (black tick: 2-component binomial mixture fitted by EM to each cell's region UMI count, all genes in the region; gray tick: same oracle restricted to the genes Haplodose uses for split proposals). The oracle is a reference bound, not a tool; it ignores overdispersion, so it is optimistic. The oracle with the true parameters known (not drawn) averages %.2f-%.2f per setting with all genes and %.2f-%.2f with proposal genes. Descriptive; no test. n = %d lines, as B. Source: `%s/oracle.tsv`, `%s/oracle_even.tsv` (columns oracle_region_em, oracle_known_params), joined by line to `%s/implant/per_specimen.tsv`.",
+  sprintf("Mean ARI per setting for each tool (points, as B) against an oracle that is told the implanted region (black tick: 2-component binomial mixture fitted by EM to each cell's region UMI count, all genes in the region; gray tick: same oracle restricted to the genes Haplodose uses for split proposals). The oracle is a reference bound, not a tool; it ignores overdispersion, so it is optimistic. The oracle with the true parameters known (not drawn) averages %.2f-%.2f per setting with all genes and %.2f-%.2f with proposal genes. Descriptive; no test. n = %d lines, as B. Source: `%s/oracle.tsv`, `%s/oracle_even.tsv` (columns oracle_region_em, oracle_known_params), joined by line to `%s/implant_all5/per_specimen.tsv`.",
           min(os$known_all), max(os$known_all), min(os$known_proposal), max(os$known_proposal), nrow(orc), O, O, K), "",
   "## D_andor_snu601_arms.pdf",
   sprintf("Andor 2020 SNU-601 gastric line, scRNA vs full-depth single-cell DNA (%d of 39 arms differ between some pair of the 15 DNA clones). Precision and recall of arms called as differing between RNA clones, and AUROC of the per-arm clone-difference score. Haplodose: %d/%d called arms true (precision %.2f), recall %d/%d = %.2f, AUROC %.2f; magenta bar = range over three Haplodose scorings of the same code family (the 2026-11-02 rerun, which docs/STATUS.md places on a v6 node, and the gene-column run, which it places on v4, scored on the bin and gene columns), AUROC %.2f-%.2f. Dashed lines: chance precision %.2f, AUROC 0.5. One specimen and 39 arms: no test, no ranking claim. Sources: %s.",
           hd$dna_subclonal_arms, hd$diff_called_true, hd$diff_called_arms, hd$diff_precision, hd$diff_called_true, hd$dna_subclonal_arms,
           hd$diff_recall, hd$diff_auroc, rng[metric == "AUROC", lo], rng[metric == "AUROC", hi], hd$diff_chance_precision,
           paste(sprintf("`%s`", unlist(runs)), collapse = ", ")))
+cap_txt <- c(cap_txt, "", "## E1_scaling_time.pdf, E2_scaling_memory.pdf",
+  sprintf("Compute scaling on real Kinker query and reference cells (5k and 20k drawn without replacement; 50k, 100k and 1M with replacement, duplicates renamed; 45,977 cells available). Every run: cpu partition, v6 nodes (hard constraint), 16 CPUs, 200 GB memory cap, 72 h cap; 3 repeats up to 50k, 1 at 100k and 1M (1M only for Haplodose and infercnvpy). Wall time = whole pipeline (input reading, tool, our post-processing for comparators) from /usr/bin/time; peak memory = larger of sacct MaxRSS for the job step and /usr/bin/time. Points = runs, lines = median. Not finished (out of memory at 200 GB, time limit, or still running when plotted): %s. Source: `%s/runs.tsv`.",
+          if (nrow(nf)) paste(nf[, sprintf("%s %s rep %d (%s)", tool, format(cells, big.mark = ","), rep, state)], collapse = "; ") else "none", S))
 writeLines(cap_txt, file.path(out, "captions.md"))
 writeLines(capture.output(sessionInfo()), file.path(out, "sessionInfo.txt"))
