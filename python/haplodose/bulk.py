@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from scipy import sparse
@@ -35,6 +37,11 @@ from .programmes import fit_amplitudes, high_pass
 BULK_PROFILE = ProfileParams(beta_bounds=(0.05, 1.0))
 BETA_GRID = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.6, 0.8, 1.0)
 ARM_Z = 3.0
+# Below this many normals the arm z scale (median/MAD over the normals, treated as known) is not a calibrated
+# null: for independent Gaussian panels, the fraction of a null sample beyond |z| = 3 was 30.6% with 3 normals,
+# 5.3% with 10, 1.3% with 30 and 0.50% with 100 (docs/efficiency_review_2026-11-02.md, 50,000 repetitions;
+# not a measured pipeline false-call rate). run.json records it; calls are not suppressed.
+SMALL_PANEL = 10
 
 
 def reference_model(Yn, n_programmes, arm_reset):
@@ -87,6 +94,17 @@ def fit_sample(y, mu, v, W, reset, params: ProfileParams, rounds=2):
     return dict(E=E, shift=shift, centre=centre, beta=beta, tau=tau, sd=sd, post=post[0], path=path[0], dose=dose[0])
 
 
+def median_pseudo_counts(G, gbin, onehot, normal):
+    """bin_stat 'median': bin value = median over its genes of per-gene log ratios to the pooled normals (columns
+    `normal` of G, genes x samples), returned as pseudo counts with the same bin totals: E_bin * exp(median).
+    Each gene counts once, so a few highly expressed or tumour-specific genes cannot dominate a bin."""
+    L = G.sum(axis=0)
+    mu_g = G[:, normal].sum(axis=1) / L[normal].sum()
+    lr = np.log((G + 0.5) / (L[None] * mu_g[:, None] + 0.5))
+    med = np.column_stack([np.median(lr[gbin == j], axis=0) for j in range(onehot.shape[1])])
+    return (L[:, None] * np.asarray(onehot.T @ mu_g).ravel()[None]) * np.exp(med)
+
+
 def run_bulk(counts, samples, positions, out, exclude_genes=None, bin_genes=10, min_cpm=1.0, n_programmes=10,
              params: ProfileParams = BULK_PROFILE, bin_stat='sum'):
     """counts: TSV genes x samples (first column gene); samples: TSV with sample, role (tumour | normal).
@@ -98,6 +116,11 @@ def run_bulk(counts, samples, positions, out, exclude_genes=None, bin_genes=10, 
     normal = meta.role.eq('normal').to_numpy()
     if normal.sum() < 3:
         raise ValueError('need at least 3 normal samples')
+    if normal.sum() < SMALL_PANEL:
+        warnings.warn(f'{int(normal.sum())} normal samples: arm calls (|z| > {ARM_Z}) use a median/MAD scale from '
+                      f'the normals as if known; below {SMALL_PANEL} normals they are not calibrated (null '
+                      'exceedance about 31% at 3 normals, 5% at 10 in a Gaussian simulation). Use the z values '
+                      'as ranks, not calls.')
     cpm = X.to_numpy(np.float64) / X.to_numpy(np.float64).sum(axis=0, keepdims=True) * 1e6
     bins, gene_bin, used = make_bins(X.index, read_positions(positions), cpm[:, normal].mean(axis=1),
                                      exclude=read_gene_list(exclude_genes), bin_genes=bin_genes, min_mean=min_cpm)
@@ -108,14 +131,7 @@ def run_bulk(counts, samples, positions, out, exclude_genes=None, bin_genes=10, 
     G = X.to_numpy(np.float64)[keep]                      # genes x samples
     Y = np.asarray((onehot.T @ G).T)                      # samples x bins
     if bin_stat == 'median':
-        # Bin value = median over its genes of per-gene log ratios to the pooled normals, returned as pseudo
-        # counts with the same bin totals: E_bin * exp(median). Each gene counts once, so a few highly
-        # expressed or tumour-specific genes cannot dominate a bin.
-        L = G.sum(axis=0)
-        mu_g = G[:, normal].sum(axis=1) / L[normal].sum()
-        lr = np.log((G + 0.5) / (L[None] * mu_g[:, None] + 0.5))
-        med = np.column_stack([np.median(lr[gene_bin[keep] == j], axis=0) for j in range(J)])
-        Y = (L[:, None] * np.asarray(onehot.T @ mu_g).ravel()[None]) * np.exp(med)
+        Y = median_pseudo_counts(G, gene_bin[keep], onehot, normal)
     reset, arm_reset, arm = chromosome_starts(bins), arm_starts(bins), arm_labels(bins)
     mu, v, W = reference_model(Y[normal], n_programmes, arm_reset)
     normal_rows = np.flatnonzero(normal)
@@ -123,16 +139,20 @@ def run_bulk(counts, samples, positions, out, exclude_genes=None, bin_genes=10, 
     seg_rows, arm_rows, sample_rows = [], [], []
     lr_out = np.full((len(meta), J), np.nan, np.float32)
     for i, s in enumerate(meta['sample']):
-        # Normals are profiled against a reference fitted without them (their own null distribution).
-        ref = reference_model(Y[normal_rows[normal_rows != i]], n_programmes, arm_reset) if normal[i] else (mu, v, W)
-        f = fit_sample(Y[i], *ref, reset, params)
+        # Normals are profiled against a reference fitted without them (their own null distribution). In median
+        # mode the pseudo counts themselves depend on the normals, so they are rebuilt without the held-out one.
+        Yi = Y
+        if normal[i] and bin_stat == 'median':
+            Yi = median_pseudo_counts(G, gene_bin[keep], onehot, normal & (np.arange(len(meta)) != i))
+        ref = reference_model(Yi[normal_rows[normal_rows != i]], n_programmes, arm_reset) if normal[i] else (mu, v, W)
+        f = fit_sample(Yi[i], *ref, reset, params)
         # Reported log ratios are centred by the plain median over bins, not the HMM fit's centre: the fit
         # centre moves with the sample's own calls, which made arm values less comparable across samples
         # (U-CAN, 1,034 tumours: arm AUC loss 0.854 -> 0.904, gain 0.871 -> 0.887; per-sample rho unchanged).
-        r = log_ratio(Y[i], f['E'])
+        r = log_ratio(Yi[i], f['E'])
         r -= np.median(r)
         lr_out[i] = r
-        for row in segments_table(f['post'], f['path'], f['dose'], Y[i], f['E'],
+        for row in segments_table(f['post'], f['path'], f['dose'], Yi[i], f['E'],
                                   reset, f['beta'], float(np.median(f['sd'])), params):
             a, b = row['first_bin'], row['last_bin']
             seg_rows.append(dict(sample=s, chromosome=bins.chromosome.iloc[a], start=int(bins.start.iloc[a]),
@@ -142,8 +162,8 @@ def run_bulk(counts, samples, positions, out, exclude_genes=None, bin_genes=10, 
             arm_rows.append(dict(sample=s, arm=a_name, n_bins=len(g), median_log_ratio=float(g.r.median()),
                                  mean_log_dose=float(g.dose.mean()),
                                  gain_fraction=float(g.state.ge(3).mean()), loss_fraction=float(g.state.eq(1).mean())))
-        sample_rows.append(dict(sample=s, role=meta.role.iloc[i], binned_counts=float(Y[i].sum()), centre=f['centre'],
-                                median_centre=float(np.median(log_ratio(Y[i], f['E']))),
+        sample_rows.append(dict(sample=s, role=meta.role.iloc[i], binned_counts=float(Yi[i].sum()), centre=f['centre'],
+                                median_centre=float(np.median(log_ratio(Yi[i], f['E']))),
                                 beta=f['beta'], tau=f['tau'], programme_shift_rms=float(np.sqrt((f['shift'] ** 2).mean()))))
     arms_t = pd.DataFrame(arm_rows)
     null = arms_t[arms_t['sample'].isin(meta['sample'][normal])].groupby('arm').median_log_ratio
@@ -164,7 +184,8 @@ def run_bulk(counts, samples, positions, out, exclude_genes=None, bin_genes=10, 
     np.save(out / 'log_ratio.npy', lr_out)
     write_json(dict(mode='bulk', n_samples=len(meta), n_normals=int(normal.sum()), n_bins=J,
                     n_genes_used=int(keep.sum()), n_programmes=len(W), bin_stat=bin_stat, min_cpm=min_cpm, bin_genes=bin_genes,
-                    params=asdict(params), arm_z=ARM_Z, beta_grid=BETA_GRID, exclude_genes=str(exclude_genes)),
+                    params=asdict(params), arm_z=ARM_Z, beta_grid=BETA_GRID,
+                    arm_calls_calibrated=bool(normal.sum() >= SMALL_PANEL), exclude_genes=str(exclude_genes)),
                out / 'run.json')
     return out
 

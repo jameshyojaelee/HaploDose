@@ -19,7 +19,7 @@ mkdir -p $D
 fetch() {  # url md5 bytes dest
   local u=$1 m=$2 n=$3 f=$4 i
   [[ -e $f.ok ]] && return 0
-  for i in $(seq 1 50); do
+  for i in $(seq 1 2000); do   # FTP stalls often; resume keeps the partial file
     [[ -e $f && $(stat -c %s "$f") -lt 1024 ]] && : > "$f"
     [[ -e $f && $(stat -c %s "$f") -eq $n ]] && break
     curl -sS -C - --retry 10 --retry-delay 30 --speed-limit 1000 --speed-time 300 -o "$f" "ftp://$u" || sleep 30

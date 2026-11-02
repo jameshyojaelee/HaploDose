@@ -39,7 +39,7 @@ def main(argv=None):
     ap.add_argument('--exclude-genes', help='one gene per line, never used')
     ap.add_argument('--query-roles', default='tumour_epithelium,query')
     ap.add_argument('--bin-genes', type=int, default=50)
-    ap.add_argument('--rule', choices=['cluster', 'cell'], default='cluster')
+    ap.add_argument('--rule', choices=['cluster', 'cell', 'all'], default='cluster')
     ap.add_argument('--ncores', type=int, default=int(os.environ.get('SLURM_CPUS_PER_TASK', '8')))
     args = ap.parse_args(argv)
 
@@ -105,6 +105,8 @@ def main(argv=None):
     Z[present] = Zb[row[present]]
     del Zb
     q, h = query & present, hold & present
+    if args.rule == 'all':
+        q = query                                     # every query cell is analysed; absent cells have Z = 0
     score, malignant, clone, clusters = cnv_post.call(Z, cells, q, h, rule=args.rule, seed=C.SEED)
     profiles = C.clone_profiles(Z, cells, clone, h)
     normal_like = [c for c in pd.unique(clone) if str(c).endswith('_normal')]

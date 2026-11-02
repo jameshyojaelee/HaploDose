@@ -77,9 +77,9 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
             Y[a:b], library[a:b] = bin_sums(X, gene_bin, J)
         Y.flush()
         n_genes_input = src.n_genes
-        # Per dataset: fit-reference counts of each used gene, to split a bin's expectation across its genes.
-        ref_gene = {ds: sums[[t for t, key in enumerate(fit_types) if key.startswith(ds + '|')]].sum(axis=0)
-                    [used.column.to_numpy()] for ds in datasets}
+        # Per fit reference type: counts of each used gene, mixed with a specimen's fitted reference weights to
+        # split each bin's expectation across its genes (log_ratio_gene).
+        ref_gene = {key: sums[t][used.column.to_numpy()] for t, key in enumerate(fit_types)}
     Lbin = np.concatenate([Y[a:a + chunk].sum(axis=1, dtype=np.float64) for a in range(0, len(meta), chunk)])
     allele_data = None if alleles is None else read_alleles(
         alleles, meta.cell_id.to_numpy(), read_gene_list(allele_exclude_genes), read_site_list(allele_exclude_sites))
@@ -140,7 +140,7 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
             allele_depth[rows] = np.asarray(spec_alleles.D.sum(axis=1)).ravel()
             allele_snps[rows] = np.diff(spec_alleles.D.indptr)
         # In-sample normal reference: cells balanced at the specimen's strong allelic imbalance.
-        mu_spec, type_keys, n_in_sample = mu[:, cols], [types[c] for c in cols], 0
+        mu_spec, type_keys, n_in_sample, cand = mu[:, cols], [types[c] for c in cols], 0, None
         if spec_alleles is not None and params.in_sample_reference:
             cand, _ = balanced_cells(spec_alleles)
             if len(cand) >= params.min_cells:
@@ -162,7 +162,9 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
                            graph, gene_loader(counts, used, rows), depth_gamma.get(dataset))
         summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, clone,
                   post_max, p_normal, margin, post_store,
-                  genes=(gene_loader(counts, used, rows), gene_shares(ref_gene[dataset], used.bin.to_numpy(), J)))
+                  genes=(gene_loader(counts, used, rows),
+                         dict(counts=[ref_gene[k] for k in type_keys if k in ref_gene], gbin=used.bin.to_numpy(),
+                              n_bins=J, in_sample=cand if n_in_sample else None)))
         tables['specimens'][-1]['in_sample_reference_cells'] = n_in_sample
         hold_rows = np.flatnonzero(hold & meta.dataset.eq(dataset).to_numpy() & (Lbin >= params.min_umi))
         hold_alleles = None
@@ -239,11 +241,16 @@ def type_mismatch_genes(sums, fit_types, datasets, genes, max_log_ratio=np.log(5
     return out
 
 
-def gene_shares(ref_counts, gbin, n_bins, prior=0.5):
-    """Each used gene's share of its bin in the reference (shares sum to 1 per bin), and the gene bins."""
-    w = np.asarray(ref_counts, np.float64) + prior
-    tot = np.bincount(gbin, weights=w, minlength=n_bins)
-    return w / tot[gbin], gbin
+def gene_shares(ref_counts, weights, gbin, n_bins, prior=0.5):
+    """Each used gene's share of its bin in the specimen's fitted reference (shares sum to 1 per bin).
+
+    ref_counts [T, G]: used-gene counts per reference type, in the order of the model's mixture weights [T].
+    Gene rates per type (counts + prior over the type's total) are mixed with those weights, as the bin
+    rates are, so a bin's expectation and its gene shares describe the same reference."""
+    C = np.atleast_2d(np.asarray(ref_counts, np.float64)) + prior
+    rate = np.asarray(weights, np.float64) @ (C / C.sum(axis=1, keepdims=True))
+    tot = np.bincount(gbin, weights=rate, minlength=n_bins)
+    return rate / tot[gbin]
 
 
 def gene_level_log_ratio(y, E_bin, share, gbin, r_bin, min_expected=1.0):
@@ -252,8 +259,9 @@ def gene_level_log_ratio(y, E_bin, share, gbin, r_bin, min_expected=1.0):
     E_g splits the bin's model expectation by reference gene shares. Summed-count bins let a few highly
     expressed genes dominate (Kinker single-line rho vs DepMap 0.852 summed vs 0.862 per-gene median,
     results/singleline_decomp_20261101_2354). Genes with E_g < min_expected are left out (their log ratio
-    shrinks to 0 in small clones); bins with none keep the summed-count value. The result is shifted so
-    its median over bins equals that of r_bin (the summed-count, centred profile). Reported next to
+    shrinks to 0 in small clones). The result is shifted so that
+    its median over the bins with eligible genes equals r_bin's median over those same bins (r_bin is the
+    summed-count, centred profile); bins without eligible genes keep r_bin. Reported next to
     log_ratio, not instead of it: U-CAN spatial rho 7/11 patients higher/lower (p 0.52) and implanted-region
     amplitude in clones < 100 cells 0.419 -> 0.411 (results/genelr_20261102_0001)."""
     E = E_bin[gbin] * share
@@ -331,7 +339,14 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
     Yg = None
     if genes is not None:
         # Gene counts pooled per clone with the same responsibilities as the bin pools Yk.
-        load, (share, gbin) = genes
+        load, mix = genes
+        gbin = mix['gbin']
+        C = [np.asarray(c, np.float64) for c in mix['counts']]
+        if mix['in_sample'] is not None:                   # in-sample normal type: its own cells' gene counts
+            Gi, _ = load(np.asarray(mix['in_sample']))
+            C.append(np.asarray(Gi.sum(axis=0), np.float64).ravel())
+        assert len(C) == len(model.weights), (len(C), len(model.weights))
+        share = gene_shares(np.vstack(C), model.weights, gbin, mix['n_bins'])
         Yg = 0.0
         for a in range(0, len(rows), chunk):
             G, _ = load(np.arange(a, min(a + chunk, len(rows))))
@@ -367,9 +382,13 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
             tables['arms'].append(dict(specimen=spec, clone=name, arm=a_name, n_bins=len(g),
                                        median_log_ratio=float(g.r.median()), median_log_ratio_gene=float(g.rg.median()),
                                        mean_log_dose=float(g.dose.mean())))
+        # log_dose: this clone's own HMM fit (diagnostic, as segments.tsv); assignment_dose: the dose that set the
+        # final cell likelihoods (shared-profile dose from fit_specimen; differs from log_dose for tumour clones).
+        assign = np.asarray(res['doses'])[order[k]]
         tables['profiles'].extend(dict(specimen=spec, clone=name, bin=j, log_ratio=float(r[j]),
                                        log_ratio_gene=float(rg[j]),
-                                       log_dose=float(prof['dose'][k][j]), cn_state=int(prof['path'][k][j] + 1))
+                                       log_dose=float(prof['dose'][k][j]), assignment_dose=float(assign[j]),
+                                       cn_state=int(prof['path'][k][j] + 1))
                                   for j in range(nb))
         overlap = np.nan if k == 0 or model.programmes is None else model.programmes.overlap(prof['dose'][k],
                                                                                              model.base)

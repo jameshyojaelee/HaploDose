@@ -16,12 +16,21 @@ import numpy as np
 
 
 @jax.jit
-def _chunk_loglik(Y, L, x, U, log_rate, gamma, W, inv_phi):
+def _chunk_loglik(Y, L, x, U, rate0, delta, gamma, W, inv_phi):
+    # NB log-likelihood of each clone relative to clone 0, per bin and then summed. Summing each clone's large
+    # absolute terms in float32 and subtracting later lost small contrasts (2,000 bins, a +0.01 log-rate
+    # difference in 20 bins: float64 difference -0.005, float32 0.0). rate0 [J] is clone 0's log rate and
+    # delta [K, J] = log_rate_k - log_rate_0 (formed in float64 by the caller, so small contrasts stay exact).
+    # With s0 clone 0's normalised composition, clone k's normalised log-rate difference is
+    # d = delta_k - log1p(sum_j s0_j expm1(delta_kj)); per bin, with r = 1 / phi,
+    # Y d - (Y + r) log((r + m_k) / (r + m_0)) and log((r + m_k) / (r + m_0)) = log1p(m_0 / (r + m_0) expm1(d)).
     off = x[:, None] * gamma[None] + U @ W                                # n, J
-    lr = log_rate[None] + off[:, None, :]                                 # n, K, J
-    lr = lr - jax.scipy.special.logsumexp(lr, axis=-1, keepdims=True)
-    m = L[:, None, None] * jnp.exp(lr)
-    return jnp.sum(Y[:, None, :] * lr - (Y[:, None, :] + inv_phi) * jnp.log1p(m / inv_phi), axis=-1)
+    lr0 = rate0[None] + off
+    s0 = jnp.exp(lr0 - jax.scipy.special.logsumexp(lr0, axis=-1, keepdims=True))   # n, J
+    shift = jnp.log1p(s0 @ jnp.expm1(delta).T)                            # n, K
+    d = delta[None] - shift[:, :, None]                                   # n, K, J
+    m0 = (L[:, None] * s0)[:, None, :]
+    return jnp.sum(Y[:, None, :] * d - (Y[:, None, :] + inv_phi) * jnp.log1p(m0 / (inv_phi + m0) * jnp.expm1(d)), axis=-1)
 
 
 @jax.jit
@@ -69,13 +78,17 @@ def _pad(arr, size, fill=0.0):
 
 
 def cell_loglik(Y, L, log_rate, phi, x=None, gamma=None, U=None, W=None, max_elements=2 ** 24):
-    """Y [n, J] counts, L [n] binned totals, log_rate [K, J], phi [J] -> [n, K].
+    """Y [n, J] counts, L [n] binned totals, log_rate [K, J], phi [J] -> [n, K] NB log-likelihoods relative to
+    clone 0 (row 0 of log_rate): each cell's values are shifted by a per-cell constant (clone 0's log-likelihood
+    without the gammaln terms), which posteriors, assignment margins and the Potts lambda search ignore.
 
     Optional x [n] (centred log depth) and gamma [J] (bin depth slopes);
     U [n, F] programme scores and W [F, J] programme loadings."""
     n, J = Y.shape
     K = log_rate.shape[0]
-    log_rate = jnp.asarray(log_rate, jnp.float32)
+    log_rate = np.asarray(log_rate, np.float64)
+    rate0 = jnp.asarray(log_rate[0], jnp.float32)
+    delta = jnp.asarray(log_rate - log_rate[:1], jnp.float32)
     inv_phi = jnp.asarray(1.0 / np.asarray(phi), jnp.float32)
     x = np.zeros(n, np.float32) if x is None else np.asarray(x, np.float32)
     gamma = jnp.asarray(np.zeros(J) if gamma is None else gamma, jnp.float32)
@@ -84,7 +97,7 @@ def cell_loglik(Y, L, log_rate, phi, x=None, gamma=None, U=None, W=None, max_ele
     out = np.empty((n, K), np.float32)
     for a, b, size in _chunks(n, K * J, max_elements):
         out[a:b] = np.asarray(_chunk_loglik(_pad(Y[a:b], size), _pad(L[a:b], size, 1.0), _pad(x[a:b], size),
-                                            _pad(U[a:b], size), log_rate, gamma, W, inv_phi))[:b - a]
+                                            _pad(U[a:b], size), rate0, delta, gamma, W, inv_phi))[:b - a]
     return out
 
 

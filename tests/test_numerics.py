@@ -162,3 +162,42 @@ def test_event_mixtures_ignores_one_overdispersed_gene():
     assert src.startswith('event_chrom2_')
     agree = max(np.mean(g.astype(bool) == sub), np.mean(g.astype(bool) != sub))
     assert agree > 0.9
+
+
+def _nb_loglik64(Y, L, log_rate, phi, off):
+    """float64 reference: absolute NB log-likelihood without the gammaln terms, [n, K]."""
+    lr = log_rate[None] + off[:, None, :]
+    lr = lr - np.log(np.exp(lr).sum(axis=-1, keepdims=True))
+    m = L[:, None, None] * np.exp(lr)
+    r = 1.0 / phi
+    return (Y[:, None, :] * lr - (Y[:, None, :] + r) * np.log1p(m / r)).sum(axis=-1)
+
+
+def test_cell_loglik_keeps_small_clone_contrasts():
+    """Review 2026-11-02 finding 9: a +0.01 log-rate difference in 20 of 2,000 bins, counts at clone 0's mean.
+    The float32 absolute sums returned a difference of exactly 0; the relative form must match float64."""
+    from haplodose.kernels.estep import cell_loglik
+    J, phi = 2000, np.full(2000, 0.1)
+    base = np.full(J, np.log(1.0 / J))
+    log_rate = np.stack([base, base + np.r_[np.full(20, 0.01), np.zeros(J - 20)]])
+    for L in (2e4, 2e5):
+        Y = (L * np.exp(base))[None]
+        ref = _nb_loglik64(Y, np.array([L]), log_rate, phi, np.zeros((1, J)))
+        got = cell_loglik(Y, np.array([L]), log_rate, phi)
+        want = ref[0, 1] - ref[0, 0]
+        assert want < -0.004 and abs((got[0, 1] - got[0, 0]) - want) < 0.02 * abs(want)
+
+
+def test_cell_loglik_matches_float64_with_depth_and_programmes():
+    from haplodose.kernels.estep import cell_loglik
+    rng = np.random.default_rng(7)
+    n, K, J, F = 50, 4, 300, 2
+    log_rate = np.log(rng.dirichlet(np.ones(J), K)) + rng.normal(0, 0.3, (K, J))
+    phi = rng.uniform(0.05, 0.5, J)
+    x, gamma = rng.normal(0, 0.5, n), rng.normal(0, 0.2, J)
+    U, W = rng.normal(0, 0.5, (n, F)), rng.normal(0, 0.3, (F, J))
+    L = rng.uniform(1e3, 5e4, n)
+    Y = rng.poisson(L[:, None] / J * 2.0, (n, J)).astype(float)
+    ref = _nb_loglik64(Y, L, log_rate, phi, x[:, None] * gamma[None] + U @ W)
+    got = cell_loglik(Y, L, log_rate, phi, x=x, gamma=gamma, U=U, W=W)
+    assert np.allclose(got - got[:, :1], ref - ref[:, :1], rtol=1e-4, atol=1e-2)

@@ -381,7 +381,7 @@ class SpecimenModel:
         rate = self.base[None] * np.exp(self.depth_log_rate(Lk, XLk))
         return np.atleast_1d(Lk)[:, None] * rate / rate.sum(axis=1, keepdims=True)
 
-    def shared_profiles(self, Yk, Lk, XLk):
+    def shared_profiles(self, Yk, Lk, XLk, labels=None):
         """profiles() for every group, with tumour clone doses (groups 1..) replaced by one pooled tumour dose
         plus, on bins where the clone differs from another tumour clone, its measured mean difference from the
         pool.
@@ -398,21 +398,38 @@ class SpecimenModel:
         not only on resolved differences, rescued a whole-chr12 subclone in test_spatial on one node but cost
         0.02 ARI on Kinker v3 and failed test_recovers_clones_and_normals (dev/hd1_ablate_20261101_2350/).
         Returns profiles() output with 'dose' replaced for groups 1.. and the unanchored doses in 'dose_own'
-        (for has_events)."""
+        (for has_events).
+
+        The deviation is averaged within atomic intervals: the bins are cut at every accepted segment boundary
+        of every pair and wherever the pooled path changes, so a third clone's long event cannot join two
+        opposite events that separate the first two (review 2026-11-02 #1: a 0.099 contrast fell to 0.005).
+        Segments pass the gene-consistency veto when MAP labels are given (alleles are not used here: the
+        allele pools are updated after this step), and the deviation has the fitted programme contrast
+        removed, as in `differences` (#2)."""
         Yk, Lk, XLk = np.atleast_2d(Yk), np.atleast_1d(Lk), np.atleast_2d(XLk)
         prof = self.profiles(Yk, Lk, XLk)
         t = np.arange(1, len(Yk))
         if len(t) < 2:                                     # one tumour clone: it is the shared profile
             return prof
         Yt, Lt, XLt = Yk[t].sum(axis=0), Lk[t].sum(), XLk[t].sum(axis=0)
-        shared = self.profiles(Yt, Lt, XLt)['dose'][0]
+        pooled = self.profiles(Yt, Lt, XLt)
+        shared = pooled['dose'][0]
         pairs = [(a, b) for i, a in enumerate(t) for b in t[i + 1:]]
         A, B = [a for a, _ in pairs], [b for _, b in pairs]
         res = self.differences(Yk[A], Lk[A], XLk[A], Yk[B], Lk[B], XLk[B])
         mark = np.zeros((len(Yk), self.J), bool)
+        cut = self.reset.copy()
+        cut[1:] |= pooled['path'][0][1:] != pooled['path'][0][:-1]
         for (a, b), r in zip(pairs, res):
-            for seg in r['segments']:
-                mark[[a, b], seg['first_bin']:seg['last_bin'] + 1] = True
+            segs = r['segments'] if labels is None else self.supported(r['segments'], None, None, None, None,
+                                                                       labels=labels, a=a, b=b, log=False)
+            for seg in segs:
+                f, l = seg['first_bin'], seg['last_bin']
+                mark[[a, b], f:l + 1] = True
+                cut[f] = True
+                if l + 1 < self.J:
+                    cut[l + 1] = True
+        atom = np.cumsum(cut)
         Et = self.expected(Lt, XLt)[0]
         E = self.expected(Lk, XLk)
         dose = prof['dose'].copy()
@@ -420,9 +437,11 @@ class SpecimenModel:
             d = np.log((Yk[k] + 0.5) / E[k]) - np.log((Yt + 0.5) / Et)
             w = 1.0 / (1.0 / (Yk[k] + 0.5) + 1.0 / (Yt + 0.5))
             d = d - weighted_median(d, w)
+            if self.programmes is not None:
+                d = d - fit_amplitudes(d - np.median(d), 1.0 / (0.04 + 1.0 / w), self.W)[0]
             dose[k] = shared
-            for a, b, on in runs(mark[k].astype(int), self.reset):
-                if on:
+            for a, b, key in runs(2 * atom + mark[k], self.reset):
+                if key % 2:
                     dose[k, a:b + 1] = shared[a:b + 1] + np.sum(w[a:b + 1] * d[a:b + 1]) / np.sum(w[a:b + 1])
         prof['dose_own'] = prof['dose']
         prof['dose'] = dose
@@ -500,18 +519,20 @@ class SpecimenModel:
         Y, L, XL = self.pooled(W)
         return self.differences(Y[0::2], L[0::2], XL[0::2], Y[1::2], L[1::2], XL[1::2])
 
-    def supported(self, segments, Aa, Da, Ab, Db, labels=None, a=None, b=None):
+    def supported(self, segments, Aa, Da, Ab, Db, labels=None, a=None, b=None, log=True):
         """Difference segments that pass the gene-consistency test and are not vetoed by alleles."""
         keep = []
         for s in segments:
             where = f"bins{s['first_bin']}-{s['last_bin']}"
             if labels is not None and not self.gene_consistent(s, labels, a, b):
-                self.log.append(dict(action='gene_veto', context=where))
+                if log:
+                    self.log.append(dict(action='gene_veto', context=where))
                 continue
             if (self.alleles is not None and getattr(self.alleles, 'bins', None) is not None and Aa is not None
                     and self.alleles.veto(self.alleles.snps_in(self.alleles.bins, s['first_bin'], s['last_bin']),
                                           Aa, Da, Ab, Db)):
-                self.log.append(dict(action='allele_veto', context=where))
+                if log:
+                    self.log.append(dict(action='allele_veto', context=where))
                 continue
             keep.append(s)
         return keep
@@ -674,7 +695,7 @@ class SpecimenModel:
                 pi[0] = max(pi[0], p.normal_prior / 5)   # keep the normal-like option open
                 pi /= pi.sum()
             Yk, Lk, XLk = self.pooled(R)
-            prof = self.shared_profiles(Yk, Lk, XLk)
+            prof = self.shared_profiles(Yk, Lk, XLk, labels=R.argmax(axis=1))
             if self.alleles is not None:
                 self.set_allele_pools(*self.alleles.pool(R))
             new = [np.zeros(self.J)]
@@ -814,11 +835,16 @@ class SpecimenModel:
             d = s[:, None] * Ep + r_bin[None]
             s = (r_bin * Yp / d).sum(axis=1) / np.maximum((r_bin * Ep / d).sum(axis=1), 1e-300)
         Ep = Ep * np.maximum(s, 1e-12)[:, None]
-        n_nb = np.ones(len(Yp))
+        Rnb = np.broadcast_to(r_bin[None], Yp.shape)
         if self.graph is not None and cells is not None:
-            # Spatial: counts summed over each cell's neighbourhood (proposal only); sizes add over the sum.
-            OE, n_nb = neighbourhood_sum(np.hstack([Yp, Ep]), self.graph, cells)
-            Yp, Ep = OE[:, :len(cols)], OE[:, len(cols):]
+            # Spatial: counts summed over each cell's neighbourhood (proposal only). A sum of independent NB
+            # counts with unequal means m_i and common dispersion phi has variance sum m + phi sum m^2, so its
+            # moment-matched size is (sum m)^2 / (phi sum m^2); n times one cell's size overstated it whenever
+            # depths differ (review 2026-11-02 #7: means 10 and 100, phi 0.2, variance 2,130 vs 1,320).
+            J0 = len(cols)
+            OE, _ = neighbourhood_sum(np.hstack([Yp, Ep, Ep ** 2]), self.graph, cells)
+            Yp, Ep, E2 = OE[:, :J0], OE[:, J0:2 * J0], OE[:, 2 * J0:]
+            Rnb = r_bin[None] * Ep ** 2 / np.maximum(E2, 1e-300)
         chrom = np.cumsum(self.reset)[cols]
         step = self.beta * np.log(1.5)
         found = []
@@ -832,7 +858,7 @@ class SpecimenModel:
                 if len(part) < 2:
                     continue
                 O, E = Yp[:, part], Ep[:, part]
-                r_nb = r_bin[part][None] * n_nb[:, None]
+                r_nb = Rnb[:, part]
 
                 def logp(theta):
                     # Per-cell NB log pmf summed over the region's bins, without the gammaln terms: constant
@@ -1010,15 +1036,23 @@ def fit_specimen(rows: Rows, L, mu, reset, phi, params: CloneParams, programmes=
 
 
 def neighbour_graph(xy, k):
-    """Row-normalized k-nearest-neighbour graph (self excluded) over one specimen's coordinates."""
+    """Row-normalized k-nearest-neighbour graph over one specimen's coordinates, self always excluded.
+
+    Neighbours are ordered by (distance, index), and the cell itself is removed by index rather than by
+    position: at duplicated coordinates the first neighbour returned need not be the cell (review 2026-11-02 #7:
+    60 cells on 20 triplicated points gave 20 self-edges and lambda 1.0 for random labels). The graph is
+    directed and row-normalized, so G @ R is a neighbourhood-average smoothing heuristic, not the mean-field
+    gradient of a symmetric Potts energy."""
     from scipy import sparse
     from sklearn.neighbors import NearestNeighbors
     n = len(xy)
     k = int(min(k, n - 1))
     if k < 1:
         return None
-    _, idx = NearestNeighbors(n_neighbors=k + 1).fit(xy).kneighbors(xy)
-    cols = idx[:, 1:].ravel()
+    dist, idx = NearestNeighbors(n_neighbors=k + 1).fit(xy).kneighbors(xy)
+    dist = np.where(idx == np.arange(n)[:, None], np.inf, dist)
+    order = np.lexsort((idx, dist), axis=-1)[:, :k]
+    cols = np.take_along_axis(idx, order, axis=1).ravel()
     rows = np.repeat(np.arange(n), k)
     return sparse.csr_matrix((np.full(len(cols), 1.0 / k, np.float32), (rows, cols)), shape=(n, n))
 

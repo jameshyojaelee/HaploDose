@@ -13,7 +13,7 @@
 # Kinker 2020: R inferCNV (benchmarks/comparators/run_infercnv_r.py), one run per pool and rotation, as
 # run_infercnvpy.sbatch; then evaluate.py --tool infercnv_r. Usage: sbatch run_infercnv_r.sbatch INPUT_DIR ROOT
 set -euo pipefail
-IN=$1 ROOT=$2
+IN=$1 ROOT=$2 RULE=${3:-cluster}   # RULE all + COUNTS env ('{r}' = rotation) for the implant design
 mkdir -p "$ROOT/cells"
 HD=/gpfs/commons/home/jameslee/micromamba/envs/haplodose/bin/python
 CNV=/gpfs/commons/home/jameslee/micromamba/envs/scrna_cnv/bin/python
@@ -34,9 +34,10 @@ c.loc[o, ['role', 'ref_group', 'ref_split', 'specimen', 'patient']] = ['other', 
 c.loc[o, 'design'] = 'unused'
 c.to_csv('$C', sep='\t', index=False)"
     ls -d "$ROOT/r${r}_pool$p"/infercnv_r_* >/dev/null 2>&1 || { mkdir -p "$ROOT/r${r}_pool$p"; \
-      $CNV -s benchmarks/comparators/run_infercnv_r.py --counts "$IN/counts.h5" --cells "$C" \
-        --positions "$IN/positions.tsv" --out-parent "$ROOT/r${r}_pool$p"; }
+      C0=${COUNTS:-$IN/counts.h5}; C0=${C0//\{r\}/$r}
+      $CNV -s benchmarks/comparators/run_infercnv_r.py --counts "$C0" --cells "$C" \
+        --positions "$IN/positions.tsv" --out-parent "$ROOT/r${r}_pool$p" --rule $RULE; }
   done
 done
-$HD -s benchmarks/kinker/evaluate.py --tool infercnv_r "$IN" "$ROOT/eval_$(date +%Y%m%d_%H%M%S)" "$ROOT"/r*_pool*/infercnv_r_*
+[[ -e $IN/depmap_cn.tsv.gz ]] && $HD -s benchmarks/kinker/evaluate.py --tool infercnv_r "$IN" "$ROOT/eval_$(date +%Y%m%d_%H%M%S)" "$ROOT"/r*_pool*/infercnv_r_*
 $CNV -s -m pip freeze > "$ROOT/pip_freeze_scrna_cnv.txt"

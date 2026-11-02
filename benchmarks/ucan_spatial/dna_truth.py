@@ -95,7 +95,10 @@ def main(out, sample, dest):
     w = arms.clone.map(tum).astype(float)
     rna = arms.assign(w=w).groupby('arm').apply(lambda g: pd.Series(dict(
         rna_log_ratio=np.average(g.median_log_ratio, weights=g.w),
-        rna_log_dose=np.average(g.mean_log_dose, weights=g.w), rna_bins=g.n_bins.iloc[0])), include_groups=False)
+        rna_log_dose=np.average(g.mean_log_dose, weights=g.w), rna_bins=g.n_bins.iloc[0],
+        # Gene-level column (added 2026-11-02); NaN for runs that predate it.
+        rna_log_ratio_gene=np.average(g.median_log_ratio_gene, weights=g.w) if 'median_log_ratio_gene' in g
+        else np.nan)), include_groups=False)
     prof = pd.read_csv(out / 'profiles.tsv.gz', sep='\t', usecols=['clone', 'bin', 'cn_state'])
     bins = pd.read_csv(out / 'bins.tsv', sep='\t')
     bins['arm'] = arm_of(bins.chromosome, bins.start.to_numpy(), cen)
@@ -154,6 +157,7 @@ def main(out, sample, dest):
         sample=sample, vcf=str(vcf), purity=purity, ploidy=ploidy, n_arms=int(len(table)),
         tumour_clones=int(len(tum)), tumour_cells=int(tum.sum()),
         rho_log_ratio=rho(table.rna_log_ratio, table.rel_cn), rho_log_dose=rho(table.rna_log_dose, table.rel_cn),
+        rho_log_ratio_gene=rho(table.rna_log_ratio_gene, table.rel_cn) if 'rna_log_ratio_gene' in table else None,
         dna_altered_arms=int(altered.sum()),
         altered_arms_same_direction=int((table.rna_state.eq(table.dna_state) & altered).sum()),
         altered_arms_sign_agree=int((np.sign(table.rna_log_ratio) == np.where(table.dna_state.eq('gain'), 1, -1))[altered].sum()),

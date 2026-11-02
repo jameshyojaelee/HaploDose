@@ -1,5 +1,14 @@
 # Related tools and what Haplodose takes from them
 
+Manuscript direction (2026-11-02): use the assumptions-first synthesis in
+Wang et al., *Categorization and analysis of 16 computational methods for
+estimating cell potency from single-cell RNA-seq data* (Cell Systems, 2026;
+https://doi.org/10.1016/j.cels.2026.101762) as a presentation reference. Its
+biological target is cell potency, not copy number; it is not a CNV comparator.
+HaploDose's planned methods manuscript must establish a distinct contribution
+relative to the CNV benchmarks below. See [manuscript direction and evidence
+requirements](STATUS.md#manuscript-direction-user-decision-2026-11-02).
+
 Checked 2026-10-31 against papers, docs or source code (PubMed/PMC full text where
 marked F; docs or source D; abstract only A). Details not confirmed are marked
 UNVERIFIED. Supplementary files were not read.

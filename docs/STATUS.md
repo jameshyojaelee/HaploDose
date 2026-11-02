@@ -5,6 +5,52 @@ Written 2026-11-01. Covers work from 2026-10-31 to 2026-11-01. Plan file:
 Git: one commit `d6ed692` (2026-11-01 08:35), made while 2 tests were failing.
 Current plan: `~/.claude-teams/plans/inspect-the-codebase-clearly-vast-lampson.md`.
 
+## Manuscript direction (user decision, 2026-11-02)
+
+HaploDose is intended to become a full scientific manuscript: a methods paper
+with a focused benchmark and a clear account of what RNA can reliably establish
+about genomic dosage and tumour clones. The reference for presentation is
+Wang et al., *Categorization and analysis of 16 computational methods for
+estimating cell potency from single-cell RNA-seq data* (Cell Systems, 2026;
+[DOI](https://doi.org/10.1016/j.cels.2026.101762)). That paper is a Synthesis with
+targeted reanalyses; borrow its treatment of assumptions, mathematical notation,
+implementation and validation limits. This direction does not establish current
+readiness, acceptance prospects or a target journal.
+
+The manuscript should distinguish relative RNA dosage, DNA copy-number
+alterations and clone identity as separate estimands. Bulk DNA agreement supports
+aggregate profile fidelity, not cell-level clone accuracy. Explain which
+HaploDose components improve which task through ablations, including cases where
+simple gene-ratio or pseudobulk baselines perform as well or better. Existing CNV
+benchmarks are documented in [related work](related_work.md); the contribution
+must go beyond another broad tool comparison.
+
+Evidence requirements before manuscript claims are finalized:
+
+- Freeze the method, parameters, scoring and primary endpoints before independent
+  evaluation. Record datasets already used to select outputs or tune the method
+  as development evidence, even when no model parameters were fitted on them.
+- Validate at the resolution claimed, using matched DNA where available and
+  documenting truth quality, sample correspondence and uncertainty. Synthetic
+  implants complement biological validation; they do not replace it.
+- Use patients or independently derived cell lines as biological replication
+  units, account for repeated samples and shared pools, and specify covariates,
+  effect sizes, uncertainty and the multiple-testing correction and family.
+- Include simple baselines, fair comparator inputs and post-processing, component
+  ablations, reference mismatch, expression-program confounding, rare-clone
+  sensitivity and false splits. Report failures and negative results.
+- Produce reproducible figures and tables from versioned code, inputs, seeds and
+  environment inventories. Resolve material numerical and node-dependent
+  behavior before making stability or reproducibility claims; compare resource
+  use under controlled conditions.
+
+Current results below are development evidence from multiple code versions, not
+a frozen manuscript result set. Broad superiority and reliable subclone recovery
+are not established. Bulk and scRNA-seq remain the primary benchmarks; spatial
+RNA-seq provides a secondary evaluation. The package and manuscript scope remain
+general-purpose; the CRC/IGF2 motivation is a research question, not an established
+mechanism.
+
 ## Current state (read this first)
 
 - **2026-11-02: 61 Python tests pass on v6 (jobs 22601385, 22601594; 3 Rust in 22601012); Potts fails on v4** (node-dependent,
@@ -273,6 +319,16 @@ proposal separates the subclones barely above chance, `dev/hd1_potts_20261101_22
 the outcome flips with CPU float differences. Open. A/B noise: identical code on v4 vs v5 differed by 0.004 ARI
 (HaploDose2); `--constraint` on the sbatch line does not override `--prefer` in the script, so pin in the script.
 
+Proposal floor (#5). Field rescore by floor stratum (HaploDose2): at/above 30 implanted cells (137) Haplodose
+0.192 vs infercnvpy 0.180 ARI; below (29) 0.051 vs 0.093, so the gap to infercnvpy is in the below-floor
+specimens. `--min-cells` experiment on repo code (clones H, v4, `dev/hd1_ablate_20261101_2350/out_R1_*_mc{15,20}`):
+min-cells 30 / 20 / 15: below-floor ARI 0.031 / 0.081 / 0.150, at/above 0.195 / 0.183 / 0.184, all 166 0.167 /
+0.165 / 0.178 (mc15 vs 30: 58/64, p 0.80); single-line one-clone lines 70 / 46 / 38 of 181, gene rho 0.860 in
+all. Split scores of small (< 30 cell) splits do not separate helpful ones (implant below-floor, ARI +0.1:
+scores 5-25) from single-line small splits (median 11.6, 90th percentile 21.4), so a size-dependent score
+threshold is not justified without a calibrated null. Default stays 30; `--min-cells 15` is the option when rare
+subclones matter more than extra splits.
+
 Single-line profile gap to pseudobulk (HaploDose2, `results/singleline_decomp_20261101_2354/`): summed-count
 bins let a few highly expressed genes dominate a bin (about 0.01 rho); the median of per-gene ratios within the
 same bins recovers it (0.862 vs pseudobulk 0.863). Added (HaploDose2, add-only): `profiles.tsv` log_ratio_gene
@@ -301,7 +357,19 @@ CopyKAT (Holm p 0.0015) and SCEVAN (7.5e-6). Caveats: CopyKAT has no subclone ou
 Leiden post-processing (`cnv_post`); SCEVAN's clones are its own (`--clones native`), fitted per pool, and it
 called a median of 1 clone per line. All tools got other cancer lines as the normal reference (none was built
 for that). infercnvpy single-line scores are from the 2026-11-01 16:09 evaluate run on the same input.
-R inferCNV pending (job 22598581).
+R inferCNV (job 22598581, `results/kinker_infercnv_r_20261101_2110/`; comparison with all tools in `results/kinker_field_20261102_0529/single_line_with_infercnv_r/`): single-line median rho 0.835, sign 0.954; Haplodose higher in 118/181 lines (Holm p 1.4e-6 over 5 pairs). Subclone design v3, all five tools with the 2026-11-02 scorer (`results/kinker_field_20261102_0529/implant_all5/`, ari_all, 166 lines, paired Wilcoxon, Holm over 10 tool pairs): Haplodose 0.167, infercnvpy 0.165, R inferCNV 0.163, CopyKAT 0.089, SCEVAN 0.027. Haplodose vs infercnvpy p 0.91, vs R inferCNV 0.51 (ties); Haplodose beats CopyKAT (Holm 0.0025) and SCEVAN (1.2e-5). By floor stratum (>= 30 / < 30 implanted cells; 137 / 29): Haplodose 0.192 / 0.051, infercnvpy 0.180 / 0.093, R inferCNV 0.175 / 0.107. Effect sizes for single-line (median paired rho difference, 95% bootstrap CI): vs R inferCNV +0.018 [0.009, 0.026], infercnvpy +0.033 [0.025, 0.048], CopyKAT +0.095 [0.083, 0.110], SCEVAN +0.144 [0.132, 0.161], pseudobulk -0.004 [-0.009, -0.001] (`single_line_ci/`). These are development-benchmark numbers; confirmatory claims follow `docs/heldout_protocol.md`.
+
+Compute (2026-11-02). Rough timings from the Kinker runs, not a controlled comparison (different nodes, CPU
+counts and batching): Haplodose 46 min for both rotations (2 runs of ~53k cells, 8 CPUs, v3 node), 3.1 GiB;
+infercnvpy 13 min (16 per-pool runs), 4.6 GiB; SCEVAN 6.3 h, 16 GiB; CopyKAT 9.2 h, 22 GiB (both 16 CPUs, v4).
+Controlled scaling benchmark: `results/scaling_20261102_0819/` (`benchmarks/scaling/`: prepare.py, run_one.sbatch,
+summarise.py). Real Kinker r0 query and reference cells (45,977 available): 5k / 20k without replacement, 50k
+(30,431 unique) / 100k / 1M with replacement (duplicates renamed); 3 repeats up to 50k, 1 at 100k, 1M for
+Haplodose and infercnvpy only; every run on cpu,
+`--constraint=v6`, 16 CPUs, 72 h cap, 200G memory cap (SCEVAN 5k and 20k first ran with 32G / 96G and ran out of
+memory; rerun at 200G as repeats 11-13). Wall time from /usr/bin/time -v; peak memory = max(sacct MaxRSS of the
+batch step, /usr/bin/time), since /usr/bin/time misses forked R workers and sacct samples every 30 s. Haplodose
+code frozen in `code/` (08:19). Jobs in `jobs.txt`.
 
 Field comparators (env `cnv_field`, `slurm/build_cnv_field.sbatch`: CopyKAT 1.2.5 @01924c0, SCEVAN 1.0.3
 @5a49b88, R 4.4; runner `benchmarks/comparators/run_r_field.py`, `benchmarks/kinker/run_field.sbatch`). Both use
@@ -333,6 +401,58 @@ scikit-learn 1.9.1; the env has 1.7.2. Code snapshot `results/code_snapshot_2026
 Effect (new code, jobs 22597228-30): Kinker single-line median rho 0.854 (unchanged); subclone ARI 0.126 -> 0.135;
 scale 100k: 148 s, 3.45 GiB, ARI 0.19, normals called malignant 0.20 (unchanged). The fixes are correct but do
 not explain the subclone weakness.
+
+## Review response 2026-11-02 (`docs/efficiency_review_2026-11-02.md`)
+
+Split: HaploDose1 #1, #2, #7 (clones.py) and #5 (reporting strata); HaploDose2 #3, #6, #8, #9; #4 a decision (see
+Decisions). HaploDose2 part, in the repo; full suite 65/66 on v4 (Potts, v4 only; job 22604409):
+- #9 `kernels/estep.py`: cell log-likelihoods are computed relative to clone 0 per bin from float64 log-rate
+  differences (`cell_loglik` now returns values up to a per-cell constant; every consumer uses within-cell
+  differences). The review's case (+0.01 in 20 of 2,000 bins) returned 0.0; now within 2% of float64 (new tests).
+- #3 `pipeline.py`: log_ratio_gene splits each bin's expectation by gene rates mixed with the specimen's fitted
+  reference weights (and the in-sample normal type), not raw pooled reference counts. The review's pure-type-A
+  query: max |log_ratio_gene| 0.02, was -1.0 (new test). No effect where a pool has one reference group (Kinker).
+- #6 `benchmarks/kinker/score_implant.py`: ari is NaN below 2 assigned cells (was 1.0 for an empty specimen);
+  primary endpoint ari_all (unassigned cells one extra label, missing specimen 0), coverage, n_no_output. The field
+  implant rescore reproduces every tool's mean ARI exactly (coverage 1.0 for all; `results/review2_gates_20261102_0844/implant_rescore`).
+- #8 `bulk.py`: median mode rebuilds pseudo counts without each held-out normal; fewer than 10 normals warns and
+  sets run.json `arm_calls_calibrated` false (threshold unchanged). `benchmarks/ucan_spatial/dna_truth.py` also
+  reports rho_log_ratio_gene.
+Gate, U-CAN spatial, 20 patients (18 with tumour clones), v4, base = code of 01:13 (clones C, old E-step, pooled
+gene shares) vs new = 08:44 repo (`results/review2_gates_20261102_0844/`; paired Wilcoxon, Holm over 3): bins
+rho 0.635 vs 0.635 (1/4 patients higher/lower, Holm 0.16; #9 alone does not move U-CAN); gene rho 0.636 -> 0.649
+(10/7, p 0.05, Holm 0.15; U0354 0.47 -> 0.64, U2761 0.62 -> 0.70); new gene vs new bins 0.649 vs 0.635 (10/8,
+p 0.50). Neutral arms called 31/423 and altered right 158 vs 156/371 in both. The earlier U-CAN cost of the gene
+column (7/11 against) is gone after #3. Kinker effect of #9 (+#3, a no-op with one reference group per pool),
+v4, `dev/hd1_ablate_20261101_2350/out_{Hbase,C}_*` (Hbase = 08:40 repo with clones.py C): v3 implant ARI
+0.1655 vs 0.1672 (166 lines, 24/17 higher/lower, p 0.92); single-line bins rho 0.8540 vs 0.8540 (13/18, p 0.38),
+one-clone lines 72 vs 70. No effect on Kinker.
+Also (HaploDose2, on request): `profiles.tsv` assignment_dose (the dose that set the final cell likelihoods,
+`fit_specimen` doses; normal-like clone 0) next to log_dose (the clone's own HMM fit, as segments.tsv) for #2;
+test in test_pipeline.py (15/15). #5 strata in score_implant.py (`below_floor` = n_implanted < 30, the default
+min_cells; all 166 stay in the primary endpoint). Field implant runs (`results/review2_gates_20261102_0844/
+implant_rescore_floor`), mean ari_all / region found, descriptive: 137 at or above the floor: Haplodose 0.192 /
+0.42, infercnvpy 0.180 / 0.72, CopyKAT 0.102 / 0.51, SCEVAN 0.032 / 0.20; 29 below: Haplodose 0.051 / 0.07,
+infercnvpy 0.093 / 0.48, CopyKAT 0.025 / 0.34, SCEVAN 0.004 / 0.03. Haplodose's deficit against infercnvpy sits
+in the below-floor specimens; there it almost never reports the region (2/29).
+
+HaploDose1 part, in the repo (clones.py = variant H; new `tests/test_review_20261102.py`):
+- #1 `shared_profiles`: deviations are averaged within atomic intervals, cut at every accepted segment boundary of
+  every tumour pair and at every pooled-path change. The review's probe (tumour 1 vs 2 opposite events, tumour 3
+  spanning both): contrast 0.005 before, now at least 0.9 x the independent fit's 0.099 with opposite signs, and
+  invariant to clone order. Test fails on the old code (job 22604390).
+- #2 the deviation has the fitted programme contrast removed (as in `differences`), and segments pass the
+  gene-consistency veto with MAP labels (`supported(..., log=False)`); alleles are not used there because the
+  allele pools are updated after this step in `em`. Reporting: `fit_specimen` returns both `doses` (assignment)
+  and `prof` (independent fit); profiles.tsv still writes the independent fit. Open: write the assignment dose
+  as its own column.
+- #7 `neighbour_graph` removes the cell by index and orders ties by (distance, index): 0 self-edges at
+  triplicated coordinates (was 20 in the review's probe; test fails on old code). The directed row-normalized
+  graph is documented as a smoothing heuristic, not a Potts mean-field gradient. Spatial event proposals use the
+  moment-matched NB size (sum m)^2 / (phi sum m^2) for neighbourhood sums (was n x one cell's size).
+Gate, v4, H vs Hbase: implant ARI 0.1668 vs 0.1655 (50/48, p 0.68), region found 0.39 vs 0.37; single-line bins
+rho +0.0003 (47/46, p 0.43); gene rho -0.0013 (36/64 lines, p 0.019 nominal, Holm 0.056 over the 3 H tests);
+one-clone lines 70 vs 72. Adopted for correctness; the benchmark effect is at most -0.001 rho.
 
 ## Package layout
 
@@ -419,6 +539,7 @@ H.2 and H.3 appended to `~/CRC/docs/notes/2026-10-30_meeting_followups.md`.
 | Exclude cell-type mismatched genes | Malignant agreement with Numbat: YCC155 0.56 → 0.985, YCC230 0.81 → 0.977; YCC230 clones 20 → 11; SMC normals 0.047/0.027 → 0.027/0.020 (jobs 22593864-74) |
 | Potts λ from neighbour-predicted likelihood | λ from pseudo-likelihood on smoothed labels ran away (λ = 16 with shuffled coordinates). The current rule passes both spatial tests |
 | Per-run allele splits with phase-free test | Summing all runs gave 457/54 splits driven by truncal events; requiring "clearly balanced" in the other group rejected true cnLOH splits |
+| HMM transitions keep equal exit rates (no change; review 2026-11-02 #4) | `sticky_transition` uses T_ii = 1-p, T_ij = p q_j/(1-q_i), so the long-run state occupancy is proportional to q_i(1-q_i), not q_i: neutral 0.379 for the copy-number HMM (q 0.2/0.5/0.2/0.1) and 0.452 for the difference HMM (q 0.15/0.7/0.15), against the 0.5 and 0.7 written in STATE_PRIOR/DIFF_PRIOR (recomputed by HaploDose2). q sets where a state change goes, p how often; every state is left at the same rate. Valid as is; switching to an occupancy-preserving redraw would change state exit rates and need recalibration on null false calls, so it is not done to gain sensitivity |
 
 ## Tried and reverted
 

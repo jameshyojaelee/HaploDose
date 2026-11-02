@@ -174,7 +174,7 @@ def test_gene_level_log_ratio_ignores_one_dominant_gene():
     from haplodose.pipeline import gene_level_log_ratio, gene_shares
     gbin = np.repeat([0, 1], 10)
     ref = np.r_[1000.0, np.full(9, 20.0), np.full(10, 50.0)]
-    share, gbin = gene_shares(ref, gbin, 2)
+    share = gene_shares(ref[None], [1.0], gbin, 2)
     E_bin = np.array([1180.0, 500.0])
     y = E_bin[gbin] * share
     y[0] *= 4.0                                           # the dominant gene, not copy number
@@ -195,3 +195,32 @@ def test_gene_level_columns_reported(result):
     s2 = arms[arms.specimen.eq('S2') & ~arms.clone.str.endswith('_c0')]
     r = s2.groupby(s2.arm.str.extract(r'^(chr\w+?)[pq]$', expand=False)).median_log_ratio_gene.median()
     assert r['chr7'] > 0.1 and r['chr18'] < -0.1 and abs(r['chr1']) < 0.1
+
+
+def test_gene_shares_follow_fitted_reference_weights():
+    """Review 2026-11-02 finding 3: the query is exactly reference type A; type B has the same bin totals but a
+    different gene composition in bin 2. Shares from A's fitted weight give a flat gene profile; shares from
+    raw pooling of A and B report a large false loss (about -1.0)."""
+    from haplodose.pipeline import gene_level_log_ratio, gene_shares
+    gbin = np.repeat(np.arange(5), 3)
+    A = np.full(15, 100.0)
+    A[6:9] = [240, 30, 30]
+    B = A.copy()
+    B[6:9] = [30, 135, 135]
+    E_bin = np.bincount(gbin, weights=A)                  # query = type A, so bin expectation = A's bin totals
+    r_bin = np.zeros(5)
+    fitted = gene_level_log_ratio(A, E_bin, gene_shares(np.vstack([A, B]), [1.0, 0.0], gbin, 5), gbin, r_bin)
+    pooled = gene_level_log_ratio(A, E_bin, gene_shares(np.vstack([A, B]), [0.5, 0.5], gbin, 5), gbin, r_bin)
+    assert np.abs(fitted).max() < 0.02
+    assert pooled[2] < -0.9
+
+
+def test_assignment_dose_reported(result):
+    """profiles.tsv carries the dose used for cell assignment next to the clone's own fitted log_dose; the
+    normal-like clone's assignment dose is zero (review 2026-11-02 #2)."""
+    root, _, _ = result
+    prof = pd.read_csv(root / 'out/profiles.tsv.gz', sep='\t')
+    assert prof.assignment_dose.notna().all()
+    assert (prof[prof.clone.str.endswith('_c0')].assignment_dose == 0).all()
+    s1 = prof[prof.specimen.eq('S1') & ~prof.clone.str.endswith('_c0')]
+    assert s1.groupby('clone').assignment_dose.apply(lambda d: d.abs().max()).gt(0.05).all()
