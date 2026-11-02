@@ -76,8 +76,10 @@ def learn_programmes(Y, L, mu, phi, rows_by_type, n_programmes, reset, seed, win
         samples.append((t, sub, Ys))
     Rz = np.vstack(resid)
     Rz -= Rz.mean(axis=0)
-    _, sv, Vt = np.linalg.svd(Rz, full_matrices=False)
-    F = min(n_programmes, len(sv))
+    # Only the top n_programmes components are kept, so a seeded randomized SVD replaces the full one.
+    from sklearn.utils.extmath import randomized_svd
+    F = min(n_programmes, *Rz.shape)
+    _, sv, Vt = randomized_svd(Rz, F, n_oversamples=20, n_iter=7, random_state=seed)
     basis = Vt[:F]
     weights = mu.mean(axis=1)
     depth = float(np.median(np.concatenate([L[sub] for _, sub, _ in samples])))
@@ -87,7 +89,7 @@ def learn_programmes(Y, L, mu, phi, rows_by_type, n_programmes, reset, seed, win
          for t, sub, Ys in samples]
     var = np.maximum(np.mean(np.vstack(U) ** 2, axis=0), 1e-6)
     return Programmes(W=W, prior_prec=1.0 / var, phi=np.asarray(phi, np.float64), depth=depth,
-                      variance_share=float((sv[:F] ** 2).sum() / (sv ** 2).sum()))
+                      variance_share=float((sv[:F] ** 2).sum() / (Rz ** 2).sum()))
 
 
 def fit_amplitudes(r, w, W, ridge=1e-6):

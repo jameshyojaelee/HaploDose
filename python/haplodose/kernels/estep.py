@@ -26,26 +26,37 @@ def _chunk_loglik(Y, L, x, U, log_rate, gamma, W, inv_phi):
 
 @jax.jit
 def _chunk_scores(Y, L, x, R, log_rate, gamma, W, inv_phi, prior_prec):
-    # Newton steps for u_c (NB, log link) around the responsibility-weighted clone rate.
+    # Fisher scoring for u_c on the normalised NB objective around the responsibility-weighted clone log rate
+    # (R @ log_rate, a surrogate for the responsibility-weighted likelihood). The rate is a softmax of
+    # lr0 + u W, so d log m_j / d u_f = W_fj - sum_k s_k W_fk (loadings centred on the cell's composition s).
     lr0 = R @ log_rate + x[:, None] * gamma[None]                         # n, J
     phi = 1.0 / inv_phi
 
     def step(u, _):
         lr = lr0 + u @ W
-        m = L[:, None] * jnp.exp(lr - jax.scipy.special.logsumexp(lr, axis=-1, keepdims=True))
-        g = ((Y - m) / (1.0 + phi[None] * m)) @ W.T - u * prior_prec[None]
-        H = (W[None] * (m / (1.0 + phi[None] * m))[:, None, :]) @ W.T + jnp.diag(prior_prec)[None]
+        s = jnp.exp(lr - jax.scipy.special.logsumexp(lr, axis=-1, keepdims=True))
+        m = L[:, None] * s
+        a = (Y - m) / (1.0 + phi[None] * m)                               # d loglik / d log m
+        w = m / (1.0 + phi[None] * m)                                     # Fisher weight per log m
+        Wbar = s @ W.T                                                    # n, F
+        g = a @ W.T - Wbar * a.sum(axis=1, keepdims=True) - u * prior_prec[None]
+        Ww = w @ W.T                                                      # n, F
+        H = ((W[None] * w[:, None, :]) @ W.T - Wbar[:, :, None] * Ww[:, None, :] - Ww[:, :, None] * Wbar[:, None, :]
+             + Wbar[:, :, None] * Wbar[:, None, :] * w.sum(axis=1)[:, None, None] + jnp.diag(prior_prec)[None])
         du = jnp.linalg.solve(H, g[..., None])[..., 0]
         # Damped: no bin's log rate moves more than 0.5 per step (Newton can overshoot in sparse cells).
         size = jnp.max(jnp.abs(du @ W), axis=1, keepdims=True)
         return u + du * jnp.minimum(1.0, 0.5 / jnp.maximum(size, 1e-12)), None
 
-    u, _ = jax.lax.scan(step, jnp.zeros((Y.shape[0], W.shape[0]), Y.dtype), None, length=3)
+    u, _ = jax.lax.scan(step, jnp.zeros((Y.shape[0], W.shape[0]), Y.dtype), None, length=5)
     return u
 
 
 def _chunks(n, per_row, max_elements):
-    size = int(max(16, min(n, max_elements // max(1, per_row))))
+    # Chunk rows are padded to a power of two (at most the memory cap), so specimens of different sizes reuse
+    # a few compiled shapes instead of compiling one per cell count.
+    cap = int(max(16, max_elements // max(1, per_row)))
+    size = min(cap, max(16, 1 << (int(n) - 1).bit_length()))
     for a in range(0, n, size):
         yield a, min(a + size, n), size
 

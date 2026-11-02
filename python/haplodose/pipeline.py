@@ -25,7 +25,7 @@ from .alleles import (AlleleParams, SpecimenAlleles, balanced_cells, joint_state
 from .alleles import cell_loglik as allele_loglik
 from ._native import bin_sums, grouped_column_sums, native_available
 from .bins import RIBOSOMAL, arm_labels, arm_starts, chromosome_starts, make_bins
-from .clones import CloneParams, Rows, clone_order, fit_specimen, neighbour_graph, tree_table
+from .clones import CloneParams, Rows, clone_order, fit_specimen, neighbour_graph, reference_depth_slopes, tree_table
 from .io import (CountSource, new_output_dir, open_memmap, read_cells, read_gene_list,
                  read_positions, read_site_list, write_json, write_table)
 from .kernels.estep import cell_loglik, posteriors, programme_scores
@@ -77,6 +77,9 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
             Y[a:b], library[a:b] = bin_sums(X, gene_bin, J)
         Y.flush()
         n_genes_input = src.n_genes
+        # Per dataset: fit-reference counts of each used gene, to split a bin's expectation across its genes.
+        ref_gene = {ds: sums[[t for t, key in enumerate(fit_types) if key.startswith(ds + '|')]].sum(axis=0)
+                    [used.column.to_numpy()] for ds in datasets}
     Lbin = np.concatenate([Y[a:a + chunk].sum(axis=1, dtype=np.float64) for a in range(0, len(meta), chunk)])
     allele_data = None if alleles is None else read_alleles(
         alleles, meta.cell_id.to_numpy(), read_gene_list(allele_exclude_genes), read_site_list(allele_exclude_sites))
@@ -96,7 +99,7 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
     post_max = np.full(len(meta), np.nan)
     p_normal = np.full(len(meta), np.nan)
     margin = np.full(len(meta), np.nan)
-    programmes = {}
+    programmes, depth_gamma = {}, {}
     post_store, tables = {}, {k: [] for k in ['clones', 'segments', 'profiles', 'differences', 'log', 'tree',
                                              'reference_check', 'specimens', 'allele_segments', 'arms']}
     allele_depth = np.zeros(len(meta))
@@ -120,6 +123,10 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
                 params.n_programmes, arm_starts(bins) if params.programme_window <= 0 else reset,
                 params.seed, params.programme_window)
         prog = programmes[dataset]
+        if params.depth_source == 'reference' and dataset not in depth_gamma:
+            depth_gamma[dataset] = reference_depth_slopes(
+                Y, Lbin, [np.flatnonzero(fit & (ref_key == types[c]) & (Lbin >= params.min_umi)) for c in cols],
+                params.min_cells, chunk)
         spec_alleles, snp_cols = None, None
         same_patient = meta.patient.eq(meta.patient.iloc[rows[0]]).to_numpy()
         if allele_data is not None:
@@ -152,9 +159,10 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
             if np.isfinite(xy).all():
                 graph = neighbour_graph(xy, params.spatial_neighbors)
         res = fit_specimen(Rows(Y, rows, chunk), Lbin[rows], mu_spec, reset, phi, params, prog, spec_alleles,
-                           graph, gene_loader(counts, used, rows))
+                           graph, gene_loader(counts, used, rows), depth_gamma.get(dataset))
         summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, clone,
-                  post_max, p_normal, margin, post_store)
+                  post_max, p_normal, margin, post_store,
+                  genes=(gene_loader(counts, used, rows), gene_shares(ref_gene[dataset], used.bin.to_numpy(), J)))
         tables['specimens'][-1]['in_sample_reference_cells'] = n_in_sample
         hold_rows = np.flatnonzero(hold & meta.dataset.eq(dataset).to_numpy() & (Lbin >= params.min_umi))
         hold_alleles = None
@@ -231,19 +239,52 @@ def type_mismatch_genes(sums, fit_types, datasets, genes, max_log_ratio=np.log(5
     return out
 
 
-def gene_loader(counts, used, rows):
-    """Loader of gene-level counts (used genes only) for specimen-local row positions, read in contiguous runs."""
+def gene_shares(ref_counts, gbin, n_bins, prior=0.5):
+    """Each used gene's share of its bin in the reference (shares sum to 1 per bin), and the gene bins."""
+    w = np.asarray(ref_counts, np.float64) + prior
+    tot = np.bincount(gbin, weights=w, minlength=n_bins)
+    return w / tot[gbin], gbin
+
+
+def gene_level_log_ratio(y, E_bin, share, gbin, r_bin, min_expected=1.0):
+    """Gene-level bin log ratio (log_ratio_gene): median over the bin's genes of log((y_g + 0.5) / (E_g + 0.5)).
+
+    E_g splits the bin's model expectation by reference gene shares. Summed-count bins let a few highly
+    expressed genes dominate (Kinker single-line rho vs DepMap 0.852 summed vs 0.862 per-gene median,
+    results/singleline_decomp_20261101_2354). Genes with E_g < min_expected are left out (their log ratio
+    shrinks to 0 in small clones); bins with none keep the summed-count value. The result is shifted so
+    its median over bins equals that of r_bin (the summed-count, centred profile). Reported next to
+    log_ratio, not instead of it: U-CAN spatial rho 7/11 patients higher/lower (p 0.52) and implanted-region
+    amplitude in clones < 100 cells 0.419 -> 0.411 (results/genelr_20261102_0001)."""
+    E = E_bin[gbin] * share
+    ok = E >= min_expected
+    lr = pd.Series(np.log((y + 0.5) / (E + 0.5))[ok]).groupby(gbin[ok]).median()
+    out = r_bin.copy()
+    if len(lr):
+        v = lr.to_numpy()
+        out[lr.index.to_numpy()] = v - np.median(v) + np.median(r_bin[lr.index.to_numpy()])
+    return out
+
+
+def gene_loader(counts, used, rows, block=4096):
+    """Loader of gene-level counts (used genes only) for specimen-local row positions.
+
+    Rows are read in storage blocks of `block` rows and selected in memory: a random subsample has few
+    consecutive rows, so reading only contiguous runs meant one small read per cell."""
     cols = used.column.to_numpy()
     gbin = used.bin.to_numpy()
 
     def load(local):
         glob = np.asarray(rows)[np.asarray(local)]
-        breaks = np.flatnonzero(np.diff(glob) != 1) + 1
+        order = np.argsort(glob, kind='stable')
+        g = glob[order]
         parts = []
         with CountSource(counts) as src:
-            for run in np.split(glob, breaks):
-                parts.append(src.read(int(run[0]), int(run[-1]) + 1)[:, cols])
-        return sparse.vstack(parts).tocsr(), gbin
+            for blk in np.unique(g // block):
+                sel = g[g // block == blk]
+                parts.append(src.read(int(sel[0]), int(sel[-1]) + 1)[sel - sel[0]][:, cols])
+        out = sparse.vstack(parts).tocsr()
+        return out[np.argsort(order, kind='stable')], gbin
     return load
 
 
@@ -271,7 +312,7 @@ def reference_rates(Y, Lbin, ref_key, fit, types, chunk, seed, max_cells=2000):
 
 
 def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, clone, post_max, p_normal,
-              margin, post_store):
+              margin, post_store, genes=None, chunk=4096):
     model = res['model']
     order = clone_order(res['R'])
     R, LL = res['R'][:, order], res['LL'][:, order]
@@ -287,6 +328,14 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
         top = np.sort(LL, axis=1)
         margin[rows] = top[:, -1] - top[:, -2]
     post_store[spec] = (rows, R)
+    Yg = None
+    if genes is not None:
+        # Gene counts pooled per clone with the same responsibilities as the bin pools Yk.
+        load, (share, gbin) = genes
+        Yg = 0.0
+        for a in range(0, len(rows), chunk):
+            G, _ = load(np.arange(a, min(a + chunk, len(rows))))
+            Yg = Yg + np.asarray(G.T @ R[a:a + chunk].astype(np.float64)).T
     chrom = bins.chromosome.to_numpy()
     nb = len(bins)
     al = model.alleles
@@ -311,11 +360,15 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
                 allele_resolved += r['resolved']
                 tables['allele_segments'].append(dict(specimen=spec, clone=name, **r))
         r = log_ratio(Yk[k], prof['E'][k]) - prof['centre'][k]
-        frame = pd.DataFrame({'arm': arm, 'r': r, 'dose': prof['dose'][k]})
+        # Extra column, existing log_ratio unchanged: per bin, median over genes of the gene log ratio.
+        rg = r if Yg is None else gene_level_log_ratio(Yg[k], prof['E'][k], share, gbin, r)
+        frame = pd.DataFrame({'arm': arm, 'r': r, 'rg': rg, 'dose': prof['dose'][k]})
         for a_name, g in frame.groupby('arm', sort=False):
             tables['arms'].append(dict(specimen=spec, clone=name, arm=a_name, n_bins=len(g),
-                                       median_log_ratio=float(g.r.median()), mean_log_dose=float(g.dose.mean())))
+                                       median_log_ratio=float(g.r.median()), median_log_ratio_gene=float(g.rg.median()),
+                                       mean_log_dose=float(g.dose.mean())))
         tables['profiles'].extend(dict(specimen=spec, clone=name, bin=j, log_ratio=float(r[j]),
+                                       log_ratio_gene=float(rg[j]),
                                        log_dose=float(prof['dose'][k][j]), cn_state=int(prof['path'][k][j] + 1))
                                   for j in range(nb))
         overlap = np.nan if k == 0 or model.programmes is None else model.programmes.overlap(prof['dose'][k],
@@ -328,7 +381,10 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
                                      programme_shift=float(prof['programme_shift'][k]),
                                      allele_segments_resolved=allele_resolved if al is not None else np.nan))
     # Pairwise differences between clones with enough cells, on the held-out (test) bins, depth-matched.
-    ok = [k for k in range(len(names)) if R[:, k].sum() >= params.min_cells]
+    # The pools are MAP cells, so a clone must also have min_cells at MAP (a clone sharing most of its dose
+    # with another can keep soft weight >= min_cells yet win no cell, which left an empty pool).
+    ok = [k for k in range(len(names))
+          if R[:, k].sum() >= params.min_cells and (mapc == k).sum() >= params.min_cells]
     dist = np.zeros((len(ok), len(ok)))
     pairs = [(i, j) for i in range(len(ok)) for j in range(i + 1, len(ok))]
     if pairs:
@@ -336,7 +392,11 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
         diff = model.matched_differences(mapc, list(zip(A, B)))   # depth-matched pooling of MAP cells
         for (i, j), d in zip(pairs, diff):
             genes = 0
-            for s in d['segments']:
+            # Report only segments that pass the same gene and allele vetoes as merging and splitting
+            # (vetoed segments are written to the log table by model.supported).
+            a_, b_ = order[ok[i]], order[ok[j]]
+            ad = (None,) * 4 if model.Ak is None else (model.Ak[a_], model.Dk[a_], model.Ak[b_], model.Dk[b_])
+            for s in model.supported(d['segments'], *ad, labels=mapc, a=ok[i], b=ok[j]):
                 a, b = s['first_bin'], s['last_bin']
                 n = int(bins.n_genes.iloc[a:b + 1].sum())
                 genes += n

@@ -135,3 +135,63 @@ def test_expression_programme_is_not_a_clone(tmp_path):
     ref = pd.read_csv(tmp_path / 'out/reference_check.tsv', sep='\t')
     assert (ref.fraction_called_aneuploid <= ref.expected_fraction + 0.05).all()
     assert clones.programme_overlap.dropna().max() < 0.5
+
+
+def test_arms_table(result):
+    """arms.tsv covers every bin once per clone and follows S2's chr7 gain and chr18 loss."""
+    root, _, _ = result
+    arms = pd.read_csv(root / 'out/arms.tsv', sep='\t')
+    n_bins = len(pd.read_csv(root / 'out/bins.tsv', sep='\t'))
+    assert (arms.groupby(['specimen', 'clone']).n_bins.sum() == n_bins).all()
+    s2 = arms[arms.specimen.eq('S2') & ~arms.clone.str.endswith('_c0')]
+    assert s2.clone.nunique() == 1
+    chrom = s2.arm.str.extract(r'^(chr\w+?)[pq]$', expand=False)
+    r = s2.groupby(chrom).median_log_ratio.median()
+    assert r['chr7'] > 0.1 and r['chr18'] < -0.1 and abs(r['chr1']) < 0.1
+
+
+def test_reference_depth_slopes(result):
+    """Depth slopes from reference cells, held fixed: S3's depth mix still gives one clone and S1's
+    normal cells stay normal."""
+    from haplodose.clones import CloneParams
+    root, _, _ = result
+    data = root / 'data'
+    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'out_refdepth',
+        exclude_genes=root / 'mask.txt', chunk=97, params=CloneParams(depth_source='reference'))
+    cells = pd.read_csv(root / 'out_refdepth/cells.tsv.gz', sep='\t')
+    s3 = cells[cells.specimen.eq('S3') & cells.malignant_call]
+    assert s3.clone.nunique() == 1
+    assert len(s3) > 0.9 * cells.specimen.eq('S3').sum()
+    s1 = cells[cells.specimen.eq('S1')]
+    normal = s1.truth_clone.eq('normal')
+    assert s1.loc[normal, 'malignant_call'].mean() < 0.1
+    assert s1.loc[~normal, 'malignant_call'].mean() > 0.9
+
+
+def test_gene_level_log_ratio_ignores_one_dominant_gene():
+    """A bin of 10 genes where one highly expressed gene is 4x off: the summed ratio follows it, the
+    gene median does not; genes below the expected-count floor are left out."""
+    from haplodose.pipeline import gene_level_log_ratio, gene_shares
+    gbin = np.repeat([0, 1], 10)
+    ref = np.r_[1000.0, np.full(9, 20.0), np.full(10, 50.0)]
+    share, gbin = gene_shares(ref, gbin, 2)
+    E_bin = np.array([1180.0, 500.0])
+    y = E_bin[gbin] * share
+    y[0] *= 4.0                                           # the dominant gene, not copy number
+    summed = np.log((np.bincount(gbin, weights=y) + 0.5) / (E_bin + 0.5))
+    out = gene_level_log_ratio(y, E_bin, share, gbin, summed - summed[1])
+    assert summed[0] - summed[1] > 0.9 and abs(out[0] - out[1]) < 0.05
+    low = gene_level_log_ratio(y * 1e-3, E_bin * 1e-3, share, gbin, np.array([0.3, 0.0]))
+    assert np.allclose(low, [0.3, 0.0])                   # every gene below the floor: summed value kept
+
+
+def test_gene_level_columns_reported(result):
+    """log_ratio_gene sits next to log_ratio and follows S2's chr7 gain and chr18 loss (as test_arms_table)."""
+    root, _, _ = result
+    prof = pd.read_csv(root / 'out/profiles.tsv.gz', sep='\t')
+    arms = pd.read_csv(root / 'out/arms.tsv', sep='\t')
+    assert {'log_ratio', 'log_ratio_gene'} <= set(prof.columns) and 'median_log_ratio_gene' in arms.columns
+    assert prof.log_ratio_gene.notna().all()
+    s2 = arms[arms.specimen.eq('S2') & ~arms.clone.str.endswith('_c0')]
+    r = s2.groupby(s2.arm.str.extract(r'^(chr\w+?)[pq]$', expand=False)).median_log_ratio_gene.median()
+    assert r['chr7'] > 0.1 and r['chr18'] < -0.1 and abs(r['chr1']) < 0.1

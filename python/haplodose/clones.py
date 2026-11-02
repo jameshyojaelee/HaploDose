@@ -19,8 +19,9 @@ are not split by depth. Expression programmes learned on normal cells
 so a cell with, say, an immune-like gene cluster switched on is not called a
 clone by that cluster. Pooled profiles and pooled differences get a free
 amplitude per programme, so only changes no programme combination explains can
-become segments or separate clones. Each pooled group carries XL = sum of L_c * x_c, with x_c
-the centred log depth, so its UMI-weighted mean depth is XL / L.
+become segments or separate clones. Each pooled group carries XL = (sum of L_c x_c, sum of L_c x_c^2), with
+x_c the centred log depth: the UMI-weighted mean and variance of depth, from which the pooled expectation is
+built (`SpecimenModel.expected`).
 
 Proposals use even bins and difference tests use odd bins (cross-fitting), so a
 split cannot be supported only by the noise that created it. Clone 0 is copy
@@ -45,12 +46,14 @@ import random
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy import sparse
 from scipy.cluster.hierarchy import linkage
 from scipy.special import logsumexp
 
 from .kernels.estep import cell_loglik, posteriors, programme_scores
 from .profile import (ProfileParams, _subset_reset, difference_segments, fit_pooled,
-                      group_centres, group_tau, log_ratio, segment, segments_table)
+                      group_centres, group_tau, log_ratio, runs, segment, segments_table,
+                      weighted_median)
 from .alleles import state_b
 from .programmes import fit_amplitudes
 
@@ -69,11 +72,14 @@ class CloneParams:
     cycles: int = 3
     normal_prior: float = 0.05
     event_candidates: int = 5
+    event_windows: tuple = ()             # sliding-window region sizes in proposal (even) bins; off: no gain on
+                                          # the Kinker subclone test (v2, v3) and 2.7x slower at 100k cells
     in_sample_reference: bool = True      # with alleles: allele-balanced cells as an extra baseline group
     spatial_neighbors: int = 8
     potts_lambda: float = -1.0           # < 0: chosen from neighbour-predicted cell likelihoods
     n_programmes: int = 10
     programme_window: int = 0            # bins of running mean removed; 0 = arm means (hg38 centromeres)
+    depth_source: str = 'query'          # 'reference': depth slopes from fit reference cells, held fixed
     seed: int = 20261031
     profile: ProfileParams = field(default_factory=ProfileParams)
 
@@ -94,10 +100,45 @@ class Rows:
         return np.asarray(self.Y[self.rows[np.asarray(idx)]], dtype=np.float32)
 
     def weighted_sum(self, R):
+        """R [n, G] dense or scipy sparse -> [G, bins] float64."""
         out = np.zeros((R.shape[1], self.Y.shape[1]), np.float64)
         for a, b, Yc in self.chunks():
-            out += R[a:b].T.astype(np.float64) @ Yc
+            out += np.asarray(R[a:b].T.astype(np.float64) @ Yc)
         return out
+
+
+def depth_moments(L, x):
+    """Per-cell [n, 2] (L x, L x^2): summed over a group, the UMI-weighted first and second depth moments."""
+    L, x = np.asarray(L, np.float64), np.asarray(x, np.float64)
+    return np.column_stack([L * x, L * x * x])
+
+
+def _depth_mean_var(Lk, XLk):
+    L = np.maximum(np.atleast_1d(Lk), 1.0)
+    XL = np.atleast_2d(XLk)
+    xbar = XL[:, 0] / L
+    return xbar, np.maximum(XL[:, 1] / L - xbar ** 2, 0.0)
+
+
+def nb_rate(O, E, r, w, theta=None, iters=100, tol=1e-10):
+    """Weighted NB maximum-likelihood rate ratio: theta solving sum_c w_c r_c (O_c - theta E_c) / (theta E_c + r_c) = 0,
+    for O_c ~ NB(mean theta E_c, size r_c). Fixed-point iteration theta = sum w r O / (theta E + r) / sum w r E / (theta E + r);
+    the pooled ratio sum w O / sum w E (the Poisson answer) is the start and the limit as r grows. O, E, r and w
+    broadcast (e.g. cells x bins with per-bin r and per-cell w [n, 1])."""
+    O, E = np.asarray(O, np.float64), np.asarray(E, np.float64)
+    w = np.broadcast_to(np.asarray(w, np.float64), O.shape)
+    r = np.broadcast_to(np.asarray(r, np.float64), O.shape)
+    theta = float((w * O).sum() / max((w * E).sum(), 1e-12)) if theta is None else float(theta)
+    theta = max(theta, 1e-12)
+    wr = w * r
+    for _ in range(iters):
+        d = theta * E + r
+        new = float((wr * O / d).sum() / max((wr * E / d).sum(), 1e-300))
+        new = max(new, 1e-12)
+        if abs(new - theta) <= tol * theta:
+            return new
+        theta = new
+    return theta
 
 
 def mixture_weights(Ytot, mu, iters=500):
@@ -188,9 +229,49 @@ def consolidate(g, X, params: CloneParams):
     return np.unique(g, return_inverse=True)[1]
 
 
+def pooled_depth_slopes(rows: Rows, L, x, mapc, min_cells, n_q=5):
+    """gamma_j from depth quintiles within each group of mapc, pooled over groups (not centred)."""
+    q = np.zeros(rows.n, dtype=int)
+    for k in np.unique(mapc):
+        idx = np.flatnonzero(mapc == k)
+        if len(idx) >= 2 * min_cells:
+            edges = np.quantile(x[idx], np.linspace(0, 1, n_q + 1)[1:-1])
+            q[idx] = np.searchsorted(edges, x[idx])
+    group = mapc * n_q + q
+    onehot = np.zeros((rows.n, group.max() + 1), np.float32)
+    onehot[np.arange(rows.n), group] = 1
+    Yg = rows.weighted_sum(onehot)
+    Lg = onehot.T.astype(np.float64) @ L
+    xg = (onehot.T.astype(np.float64) @ (L * x)) / np.maximum(Lg, 1.0)
+    num, den = np.zeros(Yg.shape[1]), 0.0
+    for k in np.unique(mapc):
+        gs = [g for g in range(k * n_q, (k + 1) * n_q) if g < len(Lg) and Lg[g] > 0]
+        if len(gs) < 3:
+            continue
+        share = np.log((Yg[gs] + 0.5) / Lg[gs, None])
+        share -= share.mean(axis=0)
+        xc = xg[gs] - xg[gs].mean()
+        num += xc @ share
+        den += xc @ xc
+    if den <= 0:
+        return np.zeros(Yg.shape[1])
+    return np.clip(num / den, -1.5, 1.5)
+
+
+def reference_depth_slopes(Y, L, groups, min_cells, chunk=4096):
+    """Depth slopes from reference cells (list of row arrays, one per reference group). Reference cells
+    carry no tumour copy number, so the slope cannot absorb it when depth tracks tumour content, as it
+    does for Visium HD bins."""
+    rows = np.concatenate(groups)
+    mapc = np.repeat(np.arange(len(groups)), [len(g) for g in groups])
+    logL = np.log(np.maximum(np.asarray(L, np.float64)[rows], 1.0))
+    return pooled_depth_slopes(Rows(Y, rows, chunk), np.asarray(L, np.float64)[rows], logL - logL.mean(), mapc,
+                               min_cells)
+
+
 class SpecimenModel:
     def __init__(self, rows: Rows, L, mu, reset, phi, params: CloneParams, programmes=None, alleles=None,
-                 graph=None):
+                 graph=None, gamma=None):
         self.rows, self.L, self.reset, self.params = rows, np.asarray(L, np.float64), reset, params
         self.pp = params.profile
         self.J = len(reset)
@@ -208,7 +289,10 @@ class SpecimenModel:
         logL = np.log(np.maximum(self.L, 1.0))
         self.x = logL - logL.mean()
         self.gamma = np.zeros(self.J)
-        self.gamma = self.depth_slopes(np.ones((rows.n, 1), np.float32))
+        # A fixed gamma (from reference cells) is centred once and never refit from query cells.
+        self.fixed_gamma = gamma is not None
+        self.gamma = (np.asarray(gamma, np.float64) - np.average(gamma, weights=self.base) if self.fixed_gamma
+                      else self.depth_slopes(np.ones((rows.n, 1), np.float32)))
         self.programmes = programmes
         self.W = np.zeros((1, self.J)) if programmes is None else programmes.W
         self.U = np.zeros((rows.n, len(self.W)), np.float32)
@@ -277,38 +361,72 @@ class SpecimenModel:
     # Profiles -------------------------------------------------------------
     def depth_slopes(self, R, n_q=5):
         """gamma_j from depth quintiles within each clone (MAP), pooled over clones."""
-        mapc = R.argmax(axis=1)
-        q = np.zeros(self.rows.n, dtype=int)
-        for k in np.unique(mapc):
-            idx = np.flatnonzero(mapc == k)
-            if len(idx) >= 2 * self.params.min_cells:
-                edges = np.quantile(self.x[idx], np.linspace(0, 1, n_q + 1)[1:-1])
-                q[idx] = np.searchsorted(edges, self.x[idx])
-        group = mapc * n_q + q
-        onehot = np.zeros((self.rows.n, group.max() + 1), np.float32)
-        onehot[np.arange(self.rows.n), group] = 1
-        Yg = self.rows.weighted_sum(onehot)
-        Lg = onehot.T.astype(np.float64) @ self.L
-        xg = (onehot.T.astype(np.float64) @ (self.L * self.x)) / np.maximum(Lg, 1.0)
-        num, den = np.zeros(self.J), 0.0
-        for k in np.unique(mapc):
-            gs = [g for g in range(k * n_q, (k + 1) * n_q) if g < len(Lg) and Lg[g] > 0]
-            if len(gs) < 3:
-                continue
-            share = np.log((Yg[gs] + 0.5) / Lg[gs, None])
-            share -= share.mean(axis=0)
-            xc = xg[gs] - xg[gs].mean()
-            num += xc @ share
-            den += xc @ xc
-        if den <= 0:
-            return np.zeros(self.J)
-        gamma = np.clip(num / den, -1.5, 1.5)
+        gamma = pooled_depth_slopes(self.rows, self.L, self.x, R.argmax(axis=1), self.params.min_cells, n_q)
         return gamma - np.average(gamma, weights=self.base)
 
+    def depth_log_rate(self, Lk, XLk):
+        """[G, J] log-rate shift of each pooled group from its cells' depths (up to a per-group constant).
+
+        The pooled expectation is sum_c L_c softmax(log base + gamma x_c). With log Z(x) ~ c x^2 / 2
+        (c = sum_j base_j gamma_j^2; gamma is base-centred) and x Gaussian under UMI weighting with mean m and
+        variance v, the average is base_j exp((gamma_j m + gamma_j^2 v / 2) / (1 + c v)) up to a constant.
+        On simulated depths (sd 0.6, slopes up to 1.5) the worst bin error was 2%, against 24% for the
+        mean depth alone (tests/test_numerics.py)."""
+        xbar, var = _depth_mean_var(Lk, XLk)
+        c = float(np.sum(self.base * self.gamma ** 2))
+        k = 1.0 / (1.0 + c * var)
+        return k[:, None] * (self.gamma[None] * xbar[:, None] + 0.5 * self.gamma[None] ** 2 * var[:, None])
+
     def expected(self, Lk, XLk):
-        xbar = np.atleast_1d(XLk) / np.maximum(np.atleast_1d(Lk), 1.0)
-        rate = self.base[None] * np.exp(self.gamma[None] * xbar[:, None])
+        rate = self.base[None] * np.exp(self.depth_log_rate(Lk, XLk))
         return np.atleast_1d(Lk)[:, None] * rate / rate.sum(axis=1, keepdims=True)
+
+    def shared_profiles(self, Yk, Lk, XLk):
+        """profiles() for every group, with tumour clone doses (groups 1..) replaced by one pooled tumour dose
+        plus, on bins where the clone differs from another tumour clone, its measured mean difference from the
+        pool.
+
+        profiles() segments each clone on its own, and segmentation shrinks weak evidence to neutral, so a
+        small clone's genome-wide dose is noisier and more shrunk than a large clone's. Cells then fit the
+        large clone better on hundreds of bins where the clones do not differ, and EM drains the small clone
+        (MCF7 with a 15-bin implanted loss in 57/143 cells: the region doses stayed -0.33 vs +0.22 while the
+        implanted cells' log-likelihood preference moved from -15 to +2 nats in seven rounds). Here clones
+        share every bin outside resolved pairwise differences (`differences`, test bins), and inside them take
+        a continuous, run-averaged difference: the step between a clone and a mixed pool is fractional, and
+        the segmentation states are whole copy-number steps (anchoring each clone's states to the pool, or
+        segmenting against the pooled dose, failed on the same MCF7 case). Adding the deviation on every run,
+        not only on resolved differences, rescued a whole-chr12 subclone in test_spatial on one node but cost
+        0.02 ARI on Kinker v3 and failed test_recovers_clones_and_normals (dev/hd1_ablate_20261101_2350/).
+        Returns profiles() output with 'dose' replaced for groups 1.. and the unanchored doses in 'dose_own'
+        (for has_events)."""
+        Yk, Lk, XLk = np.atleast_2d(Yk), np.atleast_1d(Lk), np.atleast_2d(XLk)
+        prof = self.profiles(Yk, Lk, XLk)
+        t = np.arange(1, len(Yk))
+        if len(t) < 2:                                     # one tumour clone: it is the shared profile
+            return prof
+        Yt, Lt, XLt = Yk[t].sum(axis=0), Lk[t].sum(), XLk[t].sum(axis=0)
+        shared = self.profiles(Yt, Lt, XLt)['dose'][0]
+        pairs = [(a, b) for i, a in enumerate(t) for b in t[i + 1:]]
+        A, B = [a for a, _ in pairs], [b for _, b in pairs]
+        res = self.differences(Yk[A], Lk[A], XLk[A], Yk[B], Lk[B], XLk[B])
+        mark = np.zeros((len(Yk), self.J), bool)
+        for (a, b), r in zip(pairs, res):
+            for seg in r['segments']:
+                mark[[a, b], seg['first_bin']:seg['last_bin'] + 1] = True
+        Et = self.expected(Lt, XLt)[0]
+        E = self.expected(Lk, XLk)
+        dose = prof['dose'].copy()
+        for k in t:
+            d = np.log((Yk[k] + 0.5) / E[k]) - np.log((Yt + 0.5) / Et)
+            w = 1.0 / (1.0 / (Yk[k] + 0.5) + 1.0 / (Yt + 0.5))
+            d = d - weighted_median(d, w)
+            dose[k] = shared
+            for a, b, on in runs(mark[k].astype(int), self.reset):
+                if on:
+                    dose[k, a:b + 1] = shared[a:b + 1] + np.sum(w[a:b + 1] * d[a:b + 1]) / np.sum(w[a:b + 1])
+        prof['dose_own'] = prof['dose']
+        prof['dose'] = dose
+        return prof
 
     def profiles(self, Yk, Lk, XLk):
         Yk, Lk = np.atleast_2d(Yk), np.atleast_1d(Lk)
@@ -316,19 +434,21 @@ class SpecimenModel:
         tau = np.maximum(group_tau(Yk, E, np.full(len(Yk), self.centre), self.reset, self.pp.tau_floor),
                          self.tau)
         centre = group_centres(Yk, E, tau)
-        post, path, dose, _ = segment(Yk, E, self.reset, centre, self.beta, self.bin_tau(tau), self.pp)
+        post, path, dose, _ = segment(Yk, E, self.reset, centre, self.beta, self.bin_tau(tau), self.pp,
+                                      decode=self.programmes is None)
         shift = np.zeros_like(E)
         if self.programmes is not None:
             # Programme amplitudes fitted around the current dose, then re-segmented (twice).
             E0 = E
-            for _ in range(2):
+            for i in range(2):
                 w = 1.0 / (tau[:, None] ** 2 + 1.0 / (Yk + 0.5))
                 shift = fit_amplitudes(log_ratio(Yk, E0) - centre[:, None] - dose, w, self.W)
                 E = E0 * np.exp(shift)
                 E *= (E0.sum(axis=1) / E.sum(axis=1))[:, None]
                 tau = np.maximum(group_tau(Yk, E, centre, self.reset, self.pp.tau_floor), self.tau)
                 centre = group_centres(Yk, E, tau)
-                post, path, dose, _ = segment(Yk, E, self.reset, centre, self.beta, self.bin_tau(tau), self.pp)
+                post, path, dose, _ = segment(Yk, E, self.reset, centre, self.beta, self.bin_tau(tau), self.pp,
+                                              decode=i == 1)
         return dict(post=post, path=path, dose=dose, tau=tau, centre=centre, E=E,
                     programme_shift=np.sqrt((shift ** 2).mean(axis=1)))
 
@@ -346,9 +466,7 @@ class SpecimenModel:
 
     # Group merging --------------------------------------------------------
     def differences(self, Ya, La, XLa, Yb, Lb, XLb):
-        xa = np.atleast_1d(XLa) / np.maximum(np.atleast_1d(La), 1.0)
-        xb = np.atleast_1d(XLb) / np.maximum(np.atleast_1d(Lb), 1.0)
-        shift = (xa - xb)[:, None] * self.gamma[None]
+        shift = self.depth_log_rate(La, XLa) - self.depth_log_rate(Lb, XLb)
         if self.programmes is not None:
             Ya, Yb = np.atleast_2d(Ya), np.atleast_2d(Yb)
             d = (np.log((Ya + 0.5) / np.atleast_1d(La)[:, None]) - np.log((Yb + 0.5) / np.atleast_1d(Lb)[:, None])
@@ -365,15 +483,20 @@ class SpecimenModel:
         both groups have the same distribution over log-depth strata (coarsened
         exact matching); depth-driven composition then cancels in the difference,
         whatever its functional form. Groups without depth overlap have no power."""
-        W = np.zeros((self.rows.n, 2 * len(pairs)), np.float32)
+        # Sparse cells x 2P weights: each cell is in at most the pairs that include its group (a dense
+        # matrix was cells x 2P float32 plus a float64 copy, ~17 GiB at 1M cells and 780 pairs).
+        r_idx, c_idx, val = [], [], []
         for i, (a, b) in enumerate(pairs):
             ia, ib = np.flatnonzero(labels == a), np.flatnonzero(labels == b)
             edges = np.quantile(np.r_[self.x[ia], self.x[ib]], np.linspace(0, 1, n_strata + 1)[1:-1])
             sa, sb = np.searchsorted(edges, self.x[ia]), np.searchsorted(edges, self.x[ib])
             na, nb = np.bincount(sa, minlength=n_strata), np.bincount(sb, minlength=n_strata)
             m = np.minimum(na, nb)
-            W[ia, 2 * i] = (m / np.maximum(na, 1))[sa]
-            W[ib, 2 * i + 1] = (m / np.maximum(nb, 1))[sb]
+            r_idx += [ia, ib]
+            c_idx += [np.full(len(ia), 2 * i), np.full(len(ib), 2 * i + 1)]
+            val += [(m / np.maximum(na, 1))[sa], (m / np.maximum(nb, 1))[sb]]
+        W = sparse.csr_matrix((np.concatenate(val), (np.concatenate(r_idx), np.concatenate(c_idx))),
+                              shape=(self.rows.n, 2 * len(pairs)), dtype=np.float64)
         Y, L, XL = self.pooled(W)
         return self.differences(Y[0::2], L[0::2], XL[0::2], Y[1::2], L[1::2], XL[1::2])
 
@@ -478,18 +601,28 @@ class SpecimenModel:
             Ag, Dg = [x for x in AD[0]], [x for x in AD[1]]
             post = list(self.alleles.fit(np.array(Ag), np.array(Dg))[0])
             runs = [self.alleles.runs(q, d) for q, d in zip(post, Dg)]
+        # Pair results depend only on the two groups, so they are cached by group id and only pairs involving
+        # a newly merged group are tested again (40 -> 1 groups: 1,521 pair tests instead of 10,660).
+        ids, next_id, cache = list(range(len(members))), len(members), {}
         while len(members) > 1:
             pairs = [(a, b) for a in range(len(members)) for b in range(a + 1, len(members))]
-            A, B = [a for a, _ in pairs], [b for _, b in pairs]
-            res = self.differences(np.array([Yg[a] for a in A]), np.array([Lg[a] for a in A]),
-                                   np.array([XLg[a] for a in A]), np.array([Yg[b] for b in B]),
-                                   np.array([Lg[b] for b in B]), np.array([XLg[b] for b in B]))
-            same = [(r['distance'], p) for r, p in zip(res, pairs) if not r['segments']
-                    and not (use_alleles and self.alleles.differ(runs[p[0]], Ag[p[0]], Dg[p[0]],
-                                                                 runs[p[1]], Ag[p[1]], Dg[p[1]]))]
+            todo = [(a, b) for a, b in pairs if (ids[a], ids[b]) not in cache]
+            if todo:
+                A, B = [a for a, _ in todo], [b for _, b in todo]
+                res = self.differences(np.array([Yg[a] for a in A]), np.array([Lg[a] for a in A]),
+                                       np.array([XLg[a] for a in A]), np.array([Yg[b] for b in B]),
+                                       np.array([Lg[b] for b in B]), np.array([XLg[b] for b in B]))
+                for r, (a, b) in zip(res, todo):
+                    differ = bool(r['segments']) or (use_alleles and self.alleles.differ(
+                        runs[a], Ag[a], Dg[a], runs[b], Ag[b], Dg[b]))
+                    cache[(ids[a], ids[b])] = (r['distance'], differ)
+            same = [(cache[(ids[a], ids[b])][0], (a, b)) for a, b in pairs if not cache[(ids[a], ids[b])][1]]
             if not same:
                 break
             dist, (a, b) = min(same)
+            ids[a] = next_id
+            ids.pop(b)
+            next_id += 1
             self.log.append(dict(action='merge', context=context, a=_name(members[a], labels), b=_name(members[b], labels),
                                  umi_a=float(Lg[a]), umi_b=float(Lg[b]), distance=dist))
             members[a] += members.pop(b)
@@ -526,8 +659,8 @@ class SpecimenModel:
                                            self.programmes.prior_prec, self.x[a:b], self.gamma)
 
     def pooled(self, R):
-        return (self.rows.weighted_sum(R), R.T.astype(np.float64) @ self.L,
-                R.T.astype(np.float64) @ (self.L * self.x))
+        Rt = R.T.astype(np.float64)
+        return self.rows.weighted_sum(R), np.asarray(Rt @ self.L).ravel(), np.asarray(Rt @ depth_moments(self.L, self.x))
 
     def em(self, doses, pi):
         """Clone 0 keeps dose 0. Returns doses, pi, responsibilities, loglik, profiles."""
@@ -541,7 +674,7 @@ class SpecimenModel:
                 pi[0] = max(pi[0], p.normal_prior / 5)   # keep the normal-like option open
                 pi /= pi.sum()
             Yk, Lk, XLk = self.pooled(R)
-            prof = self.profiles(Yk, Lk, XLk)
+            prof = self.shared_profiles(Yk, Lk, XLk)
             if self.alleles is not None:
                 self.set_allele_pools(*self.alleles.pool(R))
             new = [np.zeros(self.J)]
@@ -551,7 +684,8 @@ class SpecimenModel:
                     self.log.append(dict(action='drop_small', clone=k, n_eff=float(R[:, k].sum())))
                     continue
                 if not (self.has_events(Yk[k], prof['E'][k], prof['post'][k], prof['path'][k],
-                                        prof['dose'][k], prof['tau'][k]) or self.allele_events(k)):
+                                        prof.get('dose_own', prof['dose'])[k], prof['tau'][k])
+                        or self.allele_events(k)):
                     self.log.append(dict(action='to_normal', clone=k, n_eff=float(R[:, k].sum())))
                     continue
                 new.append(prof['dose'][k])
@@ -562,7 +696,8 @@ class SpecimenModel:
                 self.R_prev = Rk / np.maximum(Rk.sum(axis=1, keepdims=True), 1e-12)
             self._update_offset(R, new, keep)
             self._update_phi(R[:, keep], new)
-            self.gamma = self.depth_slopes(R[:, keep])
+            if not self.fixed_gamma:
+                self.gamma = self.depth_slopes(R[:, keep])
             self.update_scores(R[:, keep] / R[:, keep].sum(axis=1, keepdims=True), new)
             changed = len(keep) != len(doses)
             doses, pi = new, pi[keep] / pi[keep].sum()
@@ -654,62 +789,89 @@ class SpecimenModel:
         return out
 
     def event_mixtures(self, Yc, Lc, xc, lr, uw, cells=None):
-        """Cells sharing a shift of a chromosome or chromosome half.
+        """Cells sharing a shift of a chromosome, a chromosome half, or a sliding window of event_windows
+        proposal bins (step half a window).
 
-        Per region, a two-component negative-binomial mixture of region totals,
-        O_c ~ NB(E_c * theta_k), with free rate ratios theta_k and weight pi, is
-        fitted by EM on proposal bins only. Its log-likelihood gain over one
-        component ranks regions; the best few become split candidates, which odd
-        bins then test.
+        Per region, a two-component mixture over cells, with each proposal bin's count
+        O_cj ~ NB(E_cj * theta_k, size 1/phi_j) and free rate ratios theta_k shared by the region's bins,
+        is fitted by EM on proposal bins only. Per-bin dispersions keep one overdispersed gene
+        (FTH1, MALAT1, MT2A) from dominating a region, which a model of region totals with one
+        median dispersion did not. The log-likelihood gain over one component ranks regions; the best
+        few with distinct cell splits become split candidates, which odd bins then test.
         """
-        from scipy.special import gammaln
+        from scipy.special import xlogy
         p = self.params
         cols = np.flatnonzero(self.propose_mask)
-        Yp = Yc[:, cols]
+        Yp = np.asarray(Yc[:, cols], np.float64)
         Lp = Yp.sum(axis=1)
         A = lr[cols][None] + xc[:, None] * self.gamma[cols][None] + uw[:, cols]
-        rate = np.exp(A - logsumexp(A, axis=1, keepdims=True))          # per-cell, depth and programmes
+        Ep = Lp[:, None] * np.exp(A - logsumexp(A, axis=1, keepdims=True))   # per-cell, depth and programmes
+        r_bin = 1.0 / np.maximum(self.phi[cols], 1e-3)
+        # Per-cell NB size factor over all proposal bins (the row-wise nb_rate fixed point): a cell's total
+        # carries the noise of its overdispersed bins, which would otherwise shift every region of that cell.
+        s = np.ones(len(Yp))
+        for _ in range(20):
+            d = s[:, None] * Ep + r_bin[None]
+            s = (r_bin * Yp / d).sum(axis=1) / np.maximum((r_bin * Ep / d).sum(axis=1), 1e-300)
+        Ep = Ep * np.maximum(s, 1e-12)[:, None]
+        n_nb = np.ones(len(Yp))
+        if self.graph is not None and cells is not None:
+            # Spatial: counts summed over each cell's neighbourhood (proposal only); sizes add over the sum.
+            OE, n_nb = neighbourhood_sum(np.hstack([Yp, Ep]), self.graph, cells)
+            Yp, Ep = OE[:, :len(cols)], OE[:, len(cols):]
         chrom = np.cumsum(self.reset)[cols]
         step = self.beta * np.log(1.5)
         found = []
         for c in np.unique(chrom):
             idx = np.flatnonzero(chrom == c)
-            for part in (idx[: len(idx) // 2], idx[len(idx) // 2:], idx):
+            parts = [idx[: len(idx) // 2], idx[len(idx) // 2:], idx]
+            for w in p.event_windows:
+                if len(idx) > w:
+                    parts += [idx[s: s + w] for s in range(0, len(idx) - w // 2, max(1, w // 2))]
+            for part in parts:
                 if len(part) < 2:
                     continue
-                O = Yp[:, part].sum(axis=1).astype(np.float64)
-                E = Lp * rate[:, part].sum(axis=1)
-                if self.graph is not None and cells is not None:
-                    # Spatial: region totals summed over each cell's neighbourhood (proposal only).
-                    OE, _ = neighbourhood_sum(np.column_stack([O, E]), self.graph, cells)
-                    O, E = OE[:, 0], OE[:, 1]
+                O, E = Yp[:, part], Ep[:, part]
+                r_nb = r_bin[part][None] * n_nb[:, None]
 
                 def logp(theta):
-                    m = E * theta
-                    return (gammaln(O + r_nb) - gammaln(r_nb) + O * np.log(m / (m + r_nb))
-                            + r_nb * np.log(r_nb / (m + r_nb)))
-                theta1 = O.sum() / E.sum()
-                # NB size of this region's totals by moments (cell-level overdispersion of the
-                # region itself), so large regions do not gain from misspecification.
-                m = E * theta1
-                excess = np.sum((O - m) ** 2 - m)
-                r_nb = np.clip(np.sum(m ** 2) / excess, 1.0, 1e6) if excess > 0 else 1e6
+                    # Per-cell NB log pmf summed over the region's bins, without the gammaln terms: constant
+                    # per cell, they cancel in responsibilities and in the gain. xlogy: m = 0 and O = 0 give 0.
+                    m = E * max(theta, 1e-12)
+                    return (xlogy(O, m / (m + r_nb)) + r_nb * np.log(r_nb / (m + r_nb))).sum(axis=1)
+                theta1 = nb_rate(O, E, r_nb, 1.0)
                 ll1 = logp(theta1).sum()
                 theta = theta1 * np.exp(np.array([-0.5, 0.5]) * step)
-                pi = 0.5
+                pi, prev = 0.5, -np.inf
                 for _ in range(200):
                     la, lb = np.log1p(-pi) + logp(theta[0]), np.log(pi) + logp(theta[1])
-                    r = np.exp(lb - np.logaddexp(la, lb))
+                    total = np.logaddexp(la, lb)
+                    ll = float(total.sum())
+                    r = np.exp(lb - total)
+                    if ll - prev < 1e-6 * max(abs(ll), 1.0):
+                        break
+                    prev = ll
                     pi = float(np.clip(r.mean(), 1e-3, 1 - 1e-3))
-                    theta = np.array([((1 - r) * O).sum() / max(((1 - r) * E).sum(), 1e-9),
-                                      (r * O).sum() / max((r * E).sum(), 1e-9)])
-                gain = float(np.logaddexp(la, lb).sum() - ll1)
+                    theta = np.array([nb_rate(O, E, r_nb, (1 - r)[:, None], theta[0]),
+                                      nb_rate(O, E, r_nb, r[:, None], theta[1])])
+                gain = float(total.sum() - ll1)
                 sel = r > 0.5
                 if gain > 0 and p.min_cells <= sel.sum() <= len(sel) - p.min_cells:
                     found.append((gain, sel.astype(int),
                                   f'event_chrom{c}_bins{cols[part[0]]}-{cols[part[-1]]}'))
         found.sort(key=lambda x: -x[0])
-        return [(g, src) for _, g, src in found[: p.event_candidates]]
+        out, kept = [], []
+        for _, g, src in found:                             # overlapping windows of one event give one candidate
+            # Compare minority cell sets by Jaccard (labels may be flipped). Raw agreement >= 0.9 called two
+            # disjoint 5% groups duplicates; 0.7 Jaccard is about 0.9 agreement for a 30% group.
+            m = g.astype(bool)
+            m = ~m if m.mean() > 0.5 else m
+            if all((m & k).sum() / max((m | k).sum(), 1) < 0.7 for k in kept):
+                out.append((g, src))
+                kept.append(m)
+            if len(out) == p.event_candidates:
+                break
+        return out
 
     def try_splits(self, R, doses, pi):
         """Accept at most one split per clone: the candidate with the strongest resolved difference."""
@@ -719,23 +881,30 @@ class SpecimenModel:
             onehot = np.eye(g.max() + 1, dtype=np.float32)[g]
             Yg = onehot.T.astype(np.float64) @ Yc
             Lg = onehot.T.astype(np.float64) @ self.L[cells]
-            XLg = onehot.T.astype(np.float64) @ (self.L * self.x)[cells]
+            XLg = onehot.T.astype(np.float64) @ depth_moments(self.L, self.x)[cells]
             AD = None if self.Ak is None else self.alleles.pool(onehot, rows=cells)
             members, Ym, Lm, XLm, ADm = self.agglomerate(Yg, Lg, XLg, context=f'split_test_clone{k}_{source}', AD=AD)
             if len(members) < 2:
                 continue
+            # Every pair of parts must differ after depth matching (all parts are added as clones below);
+            # the split's score is its weakest pair.
             part = np.full(self.rows.n, -1)
-            for j, m in enumerate(members[:2]):
+            for j, m in enumerate(members):
                 part[cells[np.isin(g, m)]] = j
-            res = self.matched_differences(part, [(0, 1)])[0]
-            ad = (None,) * 4 if ADm is None else (ADm[0][0], ADm[1][0], ADm[0][1], ADm[1][1])
-            score = sum(abs(s['z']) for s in self.supported(res['segments'], *ad, labels=part, a=0, b=1))
-            if ADm is not None:
-                post = self.alleles.fit(ADm[0][:2], ADm[1][:2])[0]
-                runs = [self.alleles.runs(q, d) for q, d in zip(post, ADm[1][:2])]
-                score += self.alleles.differ(runs[0], ADm[0][0], ADm[1][0], runs[1], ADm[0][1], ADm[1][1])
+            pairs = [(a, b) for a in range(len(members)) for b in range(a + 1, len(members))]
+            post = None if ADm is None else self.alleles.fit(ADm[0], ADm[1])[0]
+            scores = []
+            for (a, b), res in zip(pairs, self.matched_differences(part, pairs)):
+                ad = (None,) * 4 if ADm is None else (ADm[0][a], ADm[1][a], ADm[0][b], ADm[1][b])
+                s = sum(abs(x['z']) for x in self.supported(res['segments'], *ad, labels=part, a=a, b=b))
+                if ADm is not None:
+                    ra, rb = self.alleles.runs(post[a], ADm[1][a]), self.alleles.runs(post[b], ADm[1][b])
+                    s += self.alleles.differ(ra, ADm[0][a], ADm[1][a], rb, ADm[0][b], ADm[1][b])
+                scores.append(s)
+            score = min(scores)
             if score <= 0:
-                self.log.append(dict(action='reject_split', clone=k, source=source, context='no depth-matched difference'))
+                self.log.append(dict(action='reject_split', clone=k, source=source,
+                                     context=f'no depth-matched difference in {sum(s <= 0 for s in scores)}/{len(pairs)} part pairs'))
                 continue
             if score > best.get(k, (0,))[0]:
                 labels = np.zeros(len(cells), dtype=int)
@@ -783,18 +952,18 @@ def _name(members, labels):
 
 
 def fit_specimen(rows: Rows, L, mu, reset, phi, params: CloneParams, programmes=None, alleles=None, graph=None,
-                 gene_loader=None):
+                 gene_loader=None, gamma=None):
     """Fit one specimen. Returns a dict of arrays and tables (bin indices, not coordinates).
 
     gene_loader(local_rows) -> (gene counts CSR, gene bin): enables gene-consistency checks."""
-    model = SpecimenModel(rows, L, mu, reset, phi, params, programmes, alleles, graph)
+    model = SpecimenModel(rows, L, mu, reset, phi, params, programmes, alleles, graph, gamma)
     rng = np.random.default_rng(params.seed)
     n = rows.n
     # Proposals on a bounded subsample, cross-fitted bins.
     sub = np.sort(rng.choice(n, min(n, params.max_proposal_cells), replace=False))
     if gene_loader is not None:
         model.genes = (sub, *gene_loader(sub))
-    Ys, Ls, XLs = rows.take(sub), model.L[sub], (model.L * model.x)[sub]
+    Ys, Ls, XLs = rows.take(sub), model.L[sub], depth_moments(model.L, model.x)[sub]
     F = proposal_features(Ys, Ls, model.Ytot / model.Ytot.sum(), reset, params.window_bins,
                           model.propose_mask)
     g = leiden_groups(smooth_features(F, graph, sub), params)

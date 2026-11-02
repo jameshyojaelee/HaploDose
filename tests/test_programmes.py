@@ -30,7 +30,7 @@ def test_programme_scores_bounded_in_sparse_cells():
     u = programme_scores(Y, Y.sum(axis=1) + 1, np.ones((5, 1), np.float32), np.full((1, J), -np.log(J)),
                          np.full(J, 0.1), W, np.full(F, 1e-6))
     assert np.isfinite(u).all()
-    assert np.abs(u @ W).max() <= 1.5 + 1e-4                   # three steps of at most 0.5
+    assert np.abs(u @ W).max() <= 2.5 + 1e-4                   # five steps of at most 0.5
 
 
 def test_arm_mean_removal_keeps_sub_arm_structure():

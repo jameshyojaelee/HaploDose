@@ -77,8 +77,10 @@ def runs(path, reset):
     return out
 
 
-def segment(Y, E, reset, centre, beta, tau, params: ProfileParams):
-    """Batch HMM over groups. Y, E [G, J]; centre [G]; tau [G] or per bin [G, J]. Returns posteriors, paths, mean log dose."""
+def segment(Y, E, reset, centre, beta, tau, params: ProfileParams, decode=True):
+    """Batch HMM over groups. Y, E [G, J]; centre [G]; tau [G] or per bin [G, J]. Returns posteriors, Viterbi
+    paths (None when decode is False: fits that use only posteriors skip the decoding pass), mean log dose and
+    log-likelihood."""
     Y = np.atleast_2d(Y).astype(np.float32)
     E = np.atleast_2d(E).astype(np.float32)
     means = np.log(E)[..., None] + np.asarray(centre, np.float32)[:, None, None] + beta * LOG_DOSE
@@ -87,9 +89,9 @@ def segment(Y, E, reset, centre, beta, tau, params: ProfileParams):
     trans = sticky_transition(len(CN), params.p_change, STATE_PRIOR)
     init = jnp.log(jnp.asarray(STATE_PRIOR))
     post, ll = forward_backward_batch(emit, trans, init, jnp.asarray(reset))
-    path = viterbi_batch(emit, trans, init, jnp.asarray(reset))
+    path = np.asarray(viterbi_batch(emit, trans, init, jnp.asarray(reset))) if decode else None
     post = np.asarray(post)
-    return post, np.asarray(path), post @ (beta * LOG_DOSE), np.asarray(ll)
+    return post, path, post @ (beta * LOG_DOSE), np.asarray(ll)
 
 
 def fit_pooled(Y, E, reset, params: ProfileParams, rounds=4, v=None):
@@ -103,7 +105,8 @@ def fit_pooled(Y, E, reset, params: ProfileParams, rounds=4, v=None):
     tau = estimate_tau(r, Y, reset, params.tau_floor)
     beta = params.beta
     for _ in range(rounds):
-        post, path, dose, _ = segment(Y[None], E[None], reset, [centre], beta, np.sqrt(tau ** 2 + v)[None], params)
+        post, _, dose, _ = segment(Y[None], E[None], reset, [centre], beta, np.sqrt(tau ** 2 + v)[None], params,
+                                   decode=False)
         post, dose = post[0], dose[0]
         resid = r - dose
         w = 1.0 / (tau ** 2 + v + 1.0 / (Y + 0.5))

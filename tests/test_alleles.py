@@ -76,3 +76,22 @@ def test_joint_states(cnloh):
 def test_normals_not_called_by_alleles(cnloh):
     ref = pd.read_csv(cnloh / 'with' / 'reference_check.tsv', sep='\t')
     assert (ref.fraction_called_aneuploid <= ref.expected_fraction + 0.05).all()
+
+
+def test_read_alleles_chunks(tmp_path):
+    """read_alleles over several chunks: SNPs repeated across chunks merge, 1|0 counts flip, missing cM is
+    interpolated, unknown cells, unphased rows and chrX are dropped; SNPs sorted by chromosome then position."""
+    from haplodose.alleles import read_alleles
+    rows = [('c1', '2', 500, 5.0, 3, 10, '0|1', 'G2'), ('c2', 'chr1', 300, '', 1, 4, '1|0', 'G1'),
+            ('c1', 'chr1', 100, 1.0, 2, 2, '0|1', 'G1'), ('cX', 'chr1', 100, 1.0, 1, 1, '0|1', 'G1'),
+            ('c2', 'chr1', 100, 1.0, 0, 3, '1|0', 'G1'), ('c1', 'chrX', 50, 0.1, 1, 1, '0|1', 'GX'),
+            ('c2', '2', 500, 5.0, 4, 4, '0/1', 'G2'), ('c1', 'chr1', 500, 3.0, 1, 2, '0|1', 'G1')]
+    f = tmp_path / 'alleles.tsv'
+    pd.DataFrame(rows, columns=['cell', 'CHROM', 'POS', 'cM', 'AD', 'DP', 'GT', 'gene']).to_csv(f, sep='\t', index=False)
+    d = read_alleles(f, ['c1', 'c2'], chunksize=3)
+    assert d.snps[['chromosome', 'pos']].values.tolist() == [['chr1', 100], ['chr1', 300], ['chr1', 500], ['chr2', 500]]
+    # chr1:300 interpolated between 1 and 3 cM; chr2 has one SNP, so 1 cM per Mb (500 bp -> 0.0005)
+    assert np.allclose(d.snps.cM, [1.0, 2.0, 3.0, 0.0005])
+    np.testing.assert_array_equal(d.A.toarray(), [[2, 0, 1, 3], [3, 3, 0, 0]])
+    np.testing.assert_array_equal(d.D.toarray(), [[2, 0, 2, 10], [3, 4, 0, 0]])
+    assert d.excluded['unknown_cell'] == 1 and d.excluded['non_autosome'] == 1 and d.excluded['unphased_or_bad'] == 1

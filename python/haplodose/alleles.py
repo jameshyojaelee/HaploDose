@@ -77,7 +77,7 @@ def read_alleles(path, cell_ids, exclude_genes=(), exclude_sites=(), chunksize=1
     index = pd.Index(np.asarray(cell_ids, dtype=str))
     exclude_genes = {g.upper() for g in exclude_genes}
     exclude_sites = set(exclude_sites)
-    parts, excluded = [], dict(unphased_or_bad=0, non_autosome=0, gene=0, site=0, unknown_cell=0)
+    parts, snp_parts, excluded = [], [], dict(unphased_or_bad=0, non_autosome=0, gene=0, site=0, unknown_cell=0)
     cols = ['cell', 'CHROM', 'POS', 'cM', 'AD', 'DP', 'GT', 'gene']
     for f in pd.read_csv(path, sep='\t', usecols=cols, chunksize=chunksize, dtype={'gene': str, 'CHROM': str}):
         ok = f.GT.isin(['0|1', '1|0']) & (f.DP > 0) & (f.AD >= 0) & (f.AD <= f.DP)
@@ -98,15 +98,23 @@ def read_alleles(path, cell_ids, exclude_genes=(), exclude_sites=(), chunksize=1
         excluded['unknown_cell'] += int((row < 0).sum())
         good = row >= 0
         a = np.where(f.GT.eq('0|1'), f.AD, f.DP - f.AD)
-        parts.append(pd.DataFrame(dict(row=row[good], chromosome=chrom[good], pos=f.POS.to_numpy()[good],
-                                       cM=f.cM.to_numpy()[good], gene=f.gene.to_numpy()[good],
-                                       a=a[good], d=f.DP.to_numpy()[good])))
+        # Per read-count row only integers are kept (row, chromosome rank, position, counts); SNP metadata
+        # (cM, gene) goes to a per-chunk SNP table, so memory scales with SNPs, not with the strings of every row.
+        rank_c = pd.Index(AUTOSOMES).get_indexer(chrom[good]).astype(np.int8)
+        pos = f.POS.to_numpy(np.int64)[good]
+        parts.append(pd.DataFrame(dict(row=row[good].astype(np.int32), rank=rank_c, pos=pos,
+                                       a=a[good].astype(np.int32), d=f.DP.to_numpy()[good].astype(np.int32))))
+        snp_parts.append(pd.DataFrame(dict(rank=rank_c, pos=pos, cM=f.cM.to_numpy()[good], gene=f.gene.to_numpy()[good]))
+                         .groupby(['rank', 'pos'], sort=False).agg(cM=('cM', 'first'), gene=('gene', 'first'))
+                         .reset_index())
     t = pd.concat(parts, ignore_index=True)
-    rank = {c: i for i, c in enumerate(AUTOSOMES)}
-    snps = (t.groupby(['chromosome', 'pos'], sort=False).agg(cM=('cM', 'first'), gene=('gene', 'first'))
-            .reset_index())
-    snps['rank'] = snps.chromosome.map(rank)
-    snps = snps.sort_values(['rank', 'pos']).drop(columns='rank').reset_index(drop=True)
+    snps = (pd.concat(snp_parts, ignore_index=True).groupby(['rank', 'pos'], sort=False)
+            .agg(cM=('cM', 'first'), gene=('gene', 'first')).reset_index())
+    snps['chromosome'] = np.asarray(AUTOSOMES, dtype=object)[snps['rank'].to_numpy()]
+    snps = snps.sort_values(['rank', 'pos']).reset_index(drop=True)
+    key_s = snps['rank'].to_numpy(np.int64) * (1 << 32) + snps.pos.to_numpy(np.int64)
+    key_t = t['rank'].to_numpy(np.int64) * (1 << 32) + t.pos.to_numpy(np.int64)
+    snps = snps[['chromosome', 'pos', 'cM', 'gene']].copy()
     # Missing genetic positions (e.g. before the first map marker): interpolate within the
     # chromosome from physical position, else 1 cM per Mb.
     snps['cM'] = pd.to_numeric(snps.cM, errors='coerce')
@@ -120,8 +128,7 @@ def read_alleles(path, cell_ids, exclude_genes=(), exclude_sites=(), chunksize=1
             ref = bp[ok][0] if ok.any() else 0.0
             base = cm[ok][0] if ok.any() else 0.0
             snps.loc[np.asarray(idx)[miss], 'cM'] = base + (bp[miss] - ref) / 1e6
-    col = pd.MultiIndex.from_frame(snps[['chromosome', 'pos']]).get_indexer(
-        pd.MultiIndex.from_frame(t[['chromosome', 'pos']]))
+    col = pd.Index(key_s).get_indexer(key_t)
     shape = (len(index), len(snps))
     A = sparse.csr_matrix((t.a.to_numpy(np.float32), (t.row.to_numpy(), col)), shape=shape)
     D = sparse.csr_matrix((t.d.to_numpy(np.float32), (t.row.to_numpy(), col)), shape=shape)

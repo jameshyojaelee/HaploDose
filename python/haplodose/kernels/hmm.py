@@ -6,6 +6,9 @@ Forward and backward variables are prefix and suffix products of the M_t in the
 (logsumexp, +) semiring. `lax.scan` computes them sequentially (best on CPU);
 `associative_scan` computes them in O(log T) depth (best on GPU). Both carry the
 mass of earlier chains as a per-position constant, which cancels in posteriors.
+Messages are renormalised at every step (scan) or every product (associative scan)
+and the log scale is kept separately: unnormalised float32 messages grow with the
+summed emissions and lost up to 0.14 posterior mass over 10,000 positions.
 """
 from __future__ import annotations
 
@@ -31,31 +34,48 @@ def _lmm(a, b):
 
 
 def _forward_scan(M):
+    """Normalised forward variables and the per-position log normalisers (their sum is the log-likelihood)."""
     def step(alpha, m):
         alpha = logsumexp(alpha[:, None] + m, axis=0)
-        return alpha, alpha
-    alpha0 = M[0, 0]
-    _, rest = lax.scan(step, alpha0, M[1:])
-    return jnp.concatenate([alpha0[None], rest])
+        c = logsumexp(alpha)
+        return alpha - c, (alpha - c, c)
+    a0 = M[0, 0]
+    c0 = logsumexp(a0)
+    _, (rest, cs) = lax.scan(step, a0 - c0, M[1:])
+    return jnp.concatenate([(a0 - c0)[None], rest]), jnp.concatenate([c0[None], cs])
 
 
 def _backward_scan(M):
     def step(beta, m):
         beta = logsumexp(m + beta[None, :], axis=1)
+        beta = beta - jnp.max(beta)
         return beta, beta
     last = jnp.zeros(M.shape[-1], M.dtype)
     _, rest = lax.scan(step, last, M[1:], reverse=True)
     return jnp.concatenate([rest, last[None]])
 
 
+def _lmm_scaled(a, b):
+    """Log-semiring product of (matrix, log scale) pairs; the product matrix is renormalised to max 0."""
+    P = _lmm(a[0], b[0])
+    m = jnp.max(P, axis=(-2, -1), keepdims=True)
+    return P - m, a[1] + b[1] + m[..., 0, 0]
+
+
 def _forward_assoc(M):
-    return lax.associative_scan(_lmm, M)[:, 0, :]
+    m = jnp.max(M, axis=(-2, -1), keepdims=True)
+    P, s = lax.associative_scan(_lmm_scaled, (M - m, m[:, 0, 0]))
+    alpha = P[:, 0, :]
+    c = logsumexp(alpha, axis=-1)
+    return alpha - c[:, None], s + c
 
 
 def _backward_assoc(M):
     # Suffix products Q_t = M_t (x) ... (x) M_{T-1}: prefix scan of the reversed
     # sequence with the operands swapped. beta_t = rowwise logsumexp of Q_{t+1}.
-    Q = lax.associative_scan(lambda a, b: _lmm(b, a), M[::-1])[::-1]
+    m = jnp.max(M, axis=(-2, -1), keepdims=True)
+    Q, _ = lax.associative_scan(lambda a, b: _lmm_scaled(b, a), (M[::-1] - m[::-1], m[::-1, 0, 0]))
+    Q = Q[::-1]
     last = jnp.zeros((1, M.shape[-1]), M.dtype)
     return jnp.concatenate([logsumexp(Q[1:], axis=-1), last])
 
@@ -65,14 +85,16 @@ def forward_backward(log_emit, log_trans, log_init, reset, method='scan'):
     """Posterior state probabilities [T, S] and total log-likelihood."""
     M = _elements(log_emit, log_trans, log_init, reset)
     if method == 'scan':
-        alpha, beta = _forward_scan(M), _backward_scan(M)
+        (alpha, scale), beta = _forward_scan(M), _backward_scan(M)
+        ll = jnp.sum(scale)
     elif method == 'assoc':
-        alpha, beta = _forward_assoc(M), _backward_assoc(M)
+        (alpha, scale), beta = _forward_assoc(M), _backward_assoc(M)
+        ll = scale[-1]
     else:
         raise ValueError(method)
     gamma = alpha + beta
     gamma = gamma - logsumexp(gamma, axis=1, keepdims=True)
-    return jnp.exp(gamma), logsumexp(alpha[-1])
+    return jnp.exp(gamma), ll
 
 
 @jax.jit
@@ -82,7 +104,8 @@ def viterbi(log_emit, log_trans, log_init, reset):
 
     def step(delta, m):
         cand = delta[:, None] + m
-        return jnp.max(cand, axis=0), jnp.argmax(cand, axis=0).astype(jnp.int32)
+        best = jnp.max(cand, axis=0)
+        return best - jnp.max(best), jnp.argmax(cand, axis=0).astype(jnp.int32)
     last, back = lax.scan(step, M[0, 0], M[1:])
     s_last = jnp.argmax(last).astype(jnp.int32)
 

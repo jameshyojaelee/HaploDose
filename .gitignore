@@ -20,3 +20,6 @@ target/
 .env
 .env.*
 !.env.example
+
+# Downloaded benchmark data
+/data/
