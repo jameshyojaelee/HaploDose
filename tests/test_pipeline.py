@@ -10,13 +10,17 @@ from haplodose.pipeline import run
 from haplodose.simulate import write_dataset
 
 
+INPUT_CONTRACT = dict(counts_kind='raw', genome_build='hg38',
+                      coordinate_system='one-based-closed', gene_namespace='symbol')
+
+
 @pytest.fixture(scope='module')
 def result(tmp_path_factory):
     root = tmp_path_factory.mktemp('hd')
     data = write_dataset(root / 'data')
     (root / 'mask.txt').write_text('IGF2\n')
     qc = run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'out',
-             exclude_genes=root / 'mask.txt', chunk=97)
+             exclude_genes=root / 'mask.txt', chunk=97, **INPUT_CONTRACT)
     cells = pd.read_csv(root / 'out/cells.tsv.gz', sep='\t')
     return root, qc, cells
 
@@ -61,6 +65,11 @@ def test_masked_gene_and_outputs(result):
     ref = pd.read_csv(root / 'out/reference_check.tsv', sep='\t')
     # Flat prior; expected false rate for these profiles is about Phi(-d'/2) ~ 0.05.
     assert (ref.fraction_called_aneuploid < 0.10).all()
+
+
+def test_qc_records_cpu_default(result):
+    root, qc, cells = result
+    assert qc['device'] == 'cpu' and qc['backend'] == 'cpu'
 
 
 def test_guard_and_nonempty_output(tmp_path, monkeypatch):
@@ -129,7 +138,7 @@ def test_expression_programme_is_not_a_clone(tmp_path):
             dict(chromosome='chr3', start=0.60, end=0.75, fold=1.8, frac=0.25)]
     data = write_dataset(tmp_path / 'data', n_chrom=6, genes_per_chrom=1000, ref_cells_per_type=1000,
                          specimens=spec, programmes=prog)
-    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', tmp_path / 'out')
+    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', tmp_path / 'out', **INPUT_CONTRACT)
     clones = pd.read_csv(tmp_path / 'out/clones.tsv', sep='\t')
     assert (~clones.normal_like).sum() == 1
     ref = pd.read_csv(tmp_path / 'out/reference_check.tsv', sep='\t')
@@ -157,7 +166,7 @@ def test_reference_depth_slopes(result):
     root, _, _ = result
     data = root / 'data'
     run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'out_refdepth',
-        exclude_genes=root / 'mask.txt', chunk=97, params=CloneParams(depth_source='reference'))
+        exclude_genes=root / 'mask.txt', chunk=97, params=CloneParams(depth_source='reference'), **INPUT_CONTRACT)
     cells = pd.read_csv(root / 'out_refdepth/cells.tsv.gz', sep='\t')
     s3 = cells[cells.specimen.eq('S3') & cells.malignant_call]
     assert s3.clone.nunique() == 1

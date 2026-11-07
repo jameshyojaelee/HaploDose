@@ -15,8 +15,9 @@ import numpy as np
 from jax.scipy.special import gammaln, logsumexp
 
 _GH_X, _GH_W = np.polynomial.hermite.hermgauss(12)
-GH_X = jnp.asarray(_GH_X, jnp.float32)
-GH_LOGW = jnp.asarray(np.log(_GH_W) + _GH_X ** 2, jnp.float32)
+# NumPy constants: a jnp array here would start JAX at import, before haplodose.device.select can choose the device.
+GH_X = _GH_X.astype(np.float32)
+GH_LOGW = (np.log(_GH_W) + _GH_X ** 2).astype(np.float32)
 
 
 def _log_factorial_rest(y):

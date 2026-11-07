@@ -34,10 +34,26 @@ from sklearn.metrics import roc_auc_score
 CEN = Path(__file__).resolve().parents[2] / 'python/haplodose/data/centromeres_hg38.tsv'
 
 
-def arm_of(chrom, start):
-    cen = pd.read_csv(CEN, sep='\t', comment='#').set_index('chromosome').p_arm_end
+def arm_of(chrom, start, cen_path=CEN):
+    """Arm label (chr1p, chr1q, ...): q if start >= the p-arm end in cen_path (TSV chromosome, p_arm_end)."""
+    cen = pd.read_csv(cen_path, sep='\t', comment='#').set_index('chromosome').p_arm_end
     chrom = pd.Series(np.asarray(chrom, dtype=str))
     return (chrom + np.where(np.asarray(start, float) >= chrom.map(cen).fillna(np.inf).to_numpy(), 'q', 'p')).to_numpy()
+
+
+def max_pair_difference(a, names, index):
+    """Item 2 RNA score: per arm, the largest |a[x] - a[y]| over pairs of clones in names (a: arm x clone;
+    a missing value counts as no difference). All zeros when fewer than 2 clones."""
+    score = pd.Series(0.0, index=index)
+    for i, x in enumerate(names):
+        for y in names[i + 1:]:
+            score = np.maximum(score, (a[x] - a[y]).abs().fillna(0))
+    return score
+
+
+def diff_auroc(truth, score, n_clones):
+    """Item 2 AUROC of the RNA score for the arm truth; None when undefined (one truth class, < 2 RNA clones)."""
+    return float(roc_auc_score(truth, score)) if 0 < truth.sum() < len(truth) and n_clones > 1 else None
 
 
 def dna_line(scdna, line):
@@ -80,12 +96,9 @@ def main(tool_out, scdna, line, dest, arm_column='median_log_ratio'):
         a = arms[arms.specimen.eq(spec) & arms.clone.isin(keep.index)].pivot(index='arm', columns='clone', values=arm_column)
         a = a.reindex(all_arms)
         names = list(keep.index)
-        score = pd.Series(0.0, index=all_arms)
-        for i, x in enumerate(names):
-            for y in names[i + 1:]:
-                score = np.maximum(score, (a[x] - a[y]).abs().fillna(0))
+        score = max_pair_difference(a, names, all_arms)
         truth = pd.Series(all_arms.isin(diff_arms).astype(int), index=all_arms)
-        auroc = float(roc_auc_score(truth, score)) if 0 < truth.sum() < len(truth) and len(names) > 1 else None
+        auroc = diff_auroc(truth, score, len(names))
         called = set()
         if len(diffs):
             dd = diffs[diffs.specimen.eq(spec) & diffs.clone_a.isin(names) & diffs.clone_b.isin(names)]

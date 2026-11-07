@@ -1,5 +1,8 @@
 """Score Haplodose on the Kinker 2020 rotations against DepMap 24Q4 CN, with a pseudobulk baseline.
 
+Identity-checked scorer revision 1.1. Existing frozen scores are unchanged;
+reruns require a fresh destination and remain retrospective development evidence.
+
 Per query line (one single-line specimen in one rotation):
 - truth per gene: DepMap OmicsCNGene of the line minus the UMI-weighted mean over that pool's fit reference
   lines (the pooled reference is UMI-weighted); arm truth = median over the run's used genes in the arm.
@@ -27,6 +30,23 @@ from statsmodels.stats.multitest import multipletests
 CEN = Path(__file__).resolve().parents[2] / 'python/haplodose/data/centromeres_hg38.tsv'
 INFORMATIVE = 0.2
 MIN_GENES = 5
+SCORE_VERSION = '1.1_identity_checked'
+
+
+def unique_ids(values, label):
+    ids = pd.Index(values)
+    if ids.hasnans or not ids.is_unique or any(not str(value).strip() for value in ids):
+        raise ValueError(f'{label} must contain unique, nonmissing identifiers')
+    return ids
+
+
+def checked_indexer(source_ids, target_ids, label):
+    source = unique_ids(source_ids, f'source {label}')
+    target = unique_ids(target_ids, f'target {label}')
+    indexer = source.get_indexer(target)
+    if (indexer < 0).any():
+        raise ValueError(f'{label} absent from count matrix: {list(target[indexer < 0][:5])}')
+    return indexer
 
 
 def load_counts(path):
@@ -38,17 +58,26 @@ def load_counts(path):
 
 
 def score_run(inp, run, X, genes, cells, cn, cen, tool):
+    unique_ids(genes, 'count genes')
+    unique_ids(cells, 'count cells')
+    unique_ids(cn.index, 'DNA truth genes')
+    unique_ids(cn.columns, 'DNA truth lines')
+    if X.shape != (len(cells), len(genes)):
+        raise ValueError('Count matrix shape disagrees with its cell/gene identifiers')
     meta = pd.read_csv(run / 'cells.tsv.gz', sep='\t')
     used = pd.read_csv(run / 'genes.tsv.gz', sep='\t')
     bins = pd.read_csv(run / 'bins.tsv', sep='\t')
     prof = pd.read_csv(run / 'profiles.tsv.gz', sep='\t')
     clones = pd.read_csv(run / 'clones.tsv', sep='\t')
-    pos = pd.read_csv(inp / 'positions.tsv', sep='\t').drop_duplicates('gene').set_index('gene')
+    unique_ids(meta.cell_id, 'run cells')
+    unique_ids(used.gene, 'run genes')
+    pos = pd.read_csv(inp / 'positions.tsv', sep='\t').set_index('gene')
+    unique_ids(pos.index, 'position genes')
     used = used[used.gene.isin(pos.index) & used.gene.isin(cn.index)].copy()
     used['arm'] = ('chr' + pos.loc[used.gene, 'chromosome'].astype(str).str.removeprefix('chr')).to_numpy()
     used['arm'] = used.arm + np.where(pos.loc[used.gene, 'start'].to_numpy() < used.arm.map(cen).to_numpy(), 'p', 'q')
     bins_arm = used.groupby('bin').arm.agg(lambda a: a.mode().iloc[0])
-    gidx = pd.Index(genes).get_indexer(used.gene)
+    gidx = checked_indexer(genes, used.gene, 'scored genes')
     row = pd.Series(np.arange(len(cells)), index=cells)
     rows, spec_rows = [], []
     for spec, c in meta[meta.design.eq('single_line')].groupby('specimen'):
@@ -92,7 +121,7 @@ def main(inp, dest, *runs, tool='haplodose'):
     dest.mkdir(parents=True, exist_ok=False)
     cen = pd.read_csv(CEN, sep='\t', comment='#').set_index('chromosome').p_arm_end
     cn = pd.read_csv(inp / 'depmap_cn.tsv.gz', sep='\t', index_col=0)
-    cn = cn[~cn.index.duplicated()]
+    unique_ids(cn.index, 'DNA truth genes')
     X, genes, cells = load_counts(inp / 'counts.h5')
     parts = [score_run(inp, Path(r), X, genes, cells, cn, cen, tool) for r in runs]
     lines = pd.concat([p[0] for p in parts]).reset_index(drop=True)
@@ -109,7 +138,8 @@ def main(inp, dest, *runs, tool='haplodose'):
     tests = pd.DataFrame(tests)
     tests['p_holm'] = multipletests(tests.p, method='holm')[1]
     tests.to_csv(dest / 'paired_tests.tsv', sep='\t', index=False)
-    summary = dict(n_lines=int(len(lines)), median_informative_arms=float(lines.informative_arms.median()),
+    summary = dict(score_version=SCORE_VERSION, evidence_role='retrospective_development',
+                   n_lines=int(len(lines)), median_informative_arms=float(lines.informative_arms.median()),
                    median_rho={m: float(lines[f'rho_{m}'].median()) for m in methods},
                    mean_sign_informative={m: float(lines[f'sign_{m}'].mean()) for m in methods},
                    tumour_clones_distribution=specs.tumour_clones.value_counts().sort_index().to_dict(),

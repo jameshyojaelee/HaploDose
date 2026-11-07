@@ -22,8 +22,12 @@ pub fn check_csr(indptr: &[i64], indices: &[i32], data: &[f32], n_cols: usize) -
     if indices.iter().any(|&j| j < 0 || j as usize >= n_cols) {
         return Err("column index out of range".into());
     }
-    if data.iter().any(|&x| !x.is_finite() || x < 0.0) {
-        return Err("counts must be finite and nonnegative".into());
+    if data.iter().any(|&x| !x.is_finite() || x < 0.0 || x.fract() != 0.0) {
+        return Err("counts must be finite nonnegative integers".into());
+    }
+    let max_count = data.iter().copied().fold(0.0f32, f32::max) as f64;
+    if max_count * data.len() as f64 > 9_007_199_254_740_992.0 {
+        return Err("count chunk exceeds supported exact float64 accumulation range".into());
     }
     Ok(indptr.len() - 1)
 }
@@ -38,7 +42,7 @@ pub fn bin_sums(
     n_bins: usize,
 ) -> Result<(Vec<f32>, Vec<f64>)> {
     let n_rows = check_csr(indptr, indices, data, gene_bin.len())?;
-    if gene_bin.iter().any(|&b| b < -1 || b >= n_bins as i32) {
+    if gene_bin.iter().any(|&b| b < -1 || (b >= 0 && b as usize >= n_bins)) {
         return Err("gene_bin must be -1 or a valid bin index".into());
     }
     let mut out = vec![0f32; n_rows * n_bins];
@@ -54,19 +58,28 @@ pub fn bin_sums(
     out.par_chunks_mut(n_bins)
         .zip(totals.par_iter_mut())
         .enumerate()
-        .for_each(|(r, (row, total))| {
+        .try_for_each(|(r, (row, total))| -> Result<()> {
             let (lo, hi) = (indptr[r] as usize, indptr[r + 1] as usize);
             let mut sum = 0f64;
+            let mut exact = vec![0f64; n_bins];
             for k in lo..hi {
                 let x = data[k];
                 sum += x as f64;
                 let b = gene_bin[indices[k] as usize];
                 if b >= 0 {
-                    row[b as usize] += x;
+                    exact[b as usize] += x as f64;
                 }
             }
             *total = sum;
-        });
+            for (target, value) in row.iter_mut().zip(exact) {
+                let rounded = value as f32;
+                if !rounded.is_finite() || rounded as f64 != value {
+                    return Err("bin sums cannot be represented exactly in float32".into());
+                }
+                *target = rounded;
+            }
+            Ok(())
+        })?;
     Ok((out, totals))
 }
 
@@ -84,7 +97,7 @@ pub fn grouped_column_sums(
     if row_group.len() != n_rows {
         return Err("row_group length must equal the number of rows".into());
     }
-    if row_group.iter().any(|&g| g < -1 || g >= n_groups as i32) {
+    if row_group.iter().any(|&g| g < -1 || (g >= 0 && g as usize >= n_groups)) {
         return Err("row_group must be -1 or a valid group index".into());
     }
     let width = n_groups * n_cols;
@@ -143,5 +156,14 @@ mod tests {
         assert!(bin_sums(&p, &i, &d, &[0, 5, 0], 2).is_err());
         assert!(bin_sums(&p, &[0, 9, 1, 0], &d, &[0, 1, 0], 2).is_err());
         assert!(bin_sums(&p, &i, &[1., -2., 3., 4.], &[0, 1, 0], 2).is_err());
+    }
+
+    #[test]
+    fn rejects_inexact_bin_sum_and_preserves_exact_final_sum() {
+        let large = 16_777_216.0f32;
+        assert!(bin_sums(&[0, 2], &[0, 1], &[large, 1.], &[0, 0], 1).is_err());
+        let (out, totals) = bin_sums(&[0, 3], &[0, 1, 2], &[large, 1., 1.], &[0, 0, 0], 1).unwrap();
+        assert_eq!(out, vec![16_777_218.0]);
+        assert_eq!(totals, vec![16_777_218.0]);
     }
 }

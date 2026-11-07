@@ -9,6 +9,10 @@ from haplodose.pipeline import run
 from haplodose.simulate import write_dataset
 
 
+INPUT_CONTRACT = dict(counts_kind='raw', genome_build='hg38',
+                      coordinate_system='one-based-closed', gene_namespace='symbol')
+
+
 def accuracy(out):
     cells = pd.read_csv(out / 'cells.tsv.gz', sep='\t')
     t = cells[cells.truth_clone.isin(['clone1', 'clone2'])]
@@ -37,9 +41,9 @@ def spatial(tmp_path_factory):
     shuffled.loc[spec_rows, ['x', 'y']] = cells.loc[perm, ['x', 'y']].to_numpy()
     write_table(shuffled, root / 'shuffled_cells.tsv')
     args = (data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv')
-    run(*args, root / 'potts')
-    run(*args, root / 'plain', params=CloneParams(spatial_neighbors=0))
-    run(data / 'counts.h5', root / 'shuffled_cells.tsv', data / 'positions.tsv', root / 'shuffled')
+    run(*args, root / 'potts', **INPUT_CONTRACT)
+    run(*args, root / 'plain', params=CloneParams(spatial_neighbors=0), **INPUT_CONTRACT)
+    run(data / 'counts.h5', root / 'shuffled_cells.tsv', data / 'positions.tsv', root / 'shuffled', **INPUT_CONTRACT)
     return root
 
 

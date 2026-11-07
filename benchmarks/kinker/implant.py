@@ -6,17 +6,25 @@ of its cells. The two groups share the line's expression state, so only the even
 - Setting per line from a 12-cell grid (size x direction x fraction), balanced over all queries (seeded):
   size = 50, 150 or 500 expressed genes (all-cell mean >= 0.05 UMI) contiguous on one autosome;
   loss = in-region counts thinned binomially to 0.5 (2 -> 1 copies);
-  gain (GAIN_MODE 'depth_neutral', design v3, default) = every cell of the specimen thinned to 2/3, except the
-  region in implanted cells (2 -> 3 copies, relative); both groups keep the same library size, as real gains
-  roughly do. GAIN_MODE 'thin_outside' (design v2, dirs up to 20261101_1854) thinned only implanted cells
+  gain (GAIN_MODE 'depth_neutral', legacy design v3) = every cell of the specimen thinned to 2/3, except the
+  region in implanted cells (2 -> 3 copies, relative). The gain group retains R/3 additional expected UMIs,
+  where R is its original region count; this mitigates but does not remove depth differences.
+  GAIN_MODE 'thin_outside' (design v2, dirs up to 20261101_1854) thinned only implanted cells
   outside the region, so they had a third fewer UMIs; tools that model depth as a covariate (Haplodose depth
   slopes and depth-matched pooling) then read the gain as depth.
   fraction = 0.15 or 0.4 of the line's usable cells.
 - Only query cells of that rotation are changed, so each rotation has its own counts file.
 Outputs: counts_r{0,1}.h5, cells_r{0,1}.tsv (+ implanted column), implants.tsv, positions.tsv link.
-Usage: implant.py INPUT_DIR NEW_DIR [thin_outside|depth_neutral]
+Version 4 default 'fixed_library': both groups are multinomially resampled from their
+observed gene proportions, with exactly each cell's original library total. Implanted
+region weights change by (CN/2)^dosage_slope before normalization. This is a conditional
+empirical simulation, not a claim to reproduce biological count variance. 'abundance'
+Poisson-resamples both groups and allows expected library totals to change with the event.
+Legacy modes retain their original seeded draws and require dosage_slope=1.
+Usage: implant.py INPUT_DIR NEW_DIR [fixed_library|abundance|thin_outside|depth_neutral] [--dosage-slope B]
 """
 import itertools
+import argparse
 import sys
 from pathlib import Path
 
@@ -70,8 +78,31 @@ def pick_region(rng, expr, size, all_pos):
     return chrom, start, end, cols
 
 
-def main(inp, out, gain_mode='depth_neutral'):
-    assert gain_mode in ('thin_outside', 'depth_neutral')
+def resample_event(counts, in_region, factor, rng, mode='fixed_library'):
+    """Conditional simulation on observed nonzero support; one cell, no biological replication added."""
+    counts, in_region = np.asarray(counts), np.asarray(in_region, bool)
+    if counts.ndim != 1 or counts.shape != in_region.shape:
+        raise ValueError('counts and region mask must be equal-length vectors')
+    if not np.isfinite(counts).all() or np.any(counts < 0) or np.any(counts != np.floor(counts)):
+        raise ValueError('implants require finite nonnegative integer counts')
+    if not np.isfinite(factor) or factor <= 0:
+        raise ValueError('event factor must be positive and finite')
+    weights = counts.astype(float) * np.where(in_region, factor, 1.0)
+    total = int(counts.sum())
+    if mode == 'fixed_library':
+        return rng.multinomial(total, weights / weights.sum()) if total else np.zeros(len(counts), np.int64)
+    if mode == 'abundance':
+        return rng.poisson(weights)
+    raise ValueError('resampling mode must be fixed_library or abundance')
+
+
+def main(inp, out, gain_mode='fixed_library', dosage_slope=1.0):
+    if gain_mode not in ('thin_outside', 'depth_neutral', 'fixed_library', 'abundance'):
+        raise ValueError('unknown implant mode')
+    if not np.isfinite(dosage_slope) or not 0 <= dosage_slope <= 1:
+        raise ValueError('dosage_slope must lie in [0,1]')
+    if gain_mode in ('thin_outside', 'depth_neutral') and dosage_slope != 1.0:
+        raise ValueError('legacy implants require dosage_slope=1; use version 4 for compensation')
     inp, out = Path(inp).resolve(), Path(out)
     out.mkdir(parents=True, exist_ok=False)
     (out / 'positions.tsv').symlink_to(inp / 'positions.tsv')
@@ -99,19 +130,30 @@ def main(inp, out, gain_mode='depth_neutral'):
             pick = rng.choice(ids, int(round(fraction * len(ids))), replace=False)
             in_region = np.zeros(X.shape[1], bool)
             in_region[cols] = True
-            for k in row[pick].to_numpy():
-                a, b = X.indptr[k], X.indptr[k + 1]
-                hit = in_region[X.indices[a:b]] if direction == 'loss' else ~in_region[X.indices[a:b]]
-                p = 0.5 if direction == 'loss' else 2 / 3
-                X.data[a:b][hit] = rng.binomial(X.data[a:b][hit], p)
-            if direction == 'gain' and gain_mode == 'depth_neutral':
-                for k in row[np.setdiff1d(ids, pick)].to_numpy():
+            if gain_mode in ('fixed_library', 'abundance'):
+                selected = set(pick)
+                for cell in ids:
+                    k = row[cell]
                     a, b = X.indptr[k], X.indptr[k + 1]
-                    X.data[a:b] = rng_neutral.binomial(X.data[a:b], 2 / 3)
+                    factor = (0.5 if direction == 'loss' else 1.5) ** dosage_slope if cell in selected else 1.0
+                    X.data[a:b] = resample_event(X.data[a:b], in_region[X.indices[a:b]], factor,
+                                               rng_neutral, gain_mode)
+            else:
+                for k in row[pick].to_numpy():
+                    a, b = X.indptr[k], X.indptr[k + 1]
+                    hit = in_region[X.indices[a:b]] if direction == 'loss' else ~in_region[X.indices[a:b]]
+                    p = 0.5 if direction == 'loss' else 2 / 3
+                    X.data[a:b][hit] = rng.binomial(X.data[a:b][hit], p)
+                if direction == 'gain' and gain_mode == 'depth_neutral':
+                    for k in row[np.setdiff1d(ids, pick)].to_numpy():
+                        a, b = X.indptr[k], X.indptr[k + 1]
+                        X.data[a:b] = rng_neutral.binomial(X.data[a:b], 2 / 3)
             c.loc[c.cell_id.isin(pick), 'implanted'] = True
             rows.append(dict(rotation=r, specimen=q.specimen, n_cells=len(ids), n_implanted=len(pick),
                              size=size, direction=direction, fraction=fraction, gain_mode=gain_mode, chromosome=chrom,
-                             start=start, end=end, n_genes_in_region=len(cols)))
+                             start=start, end=end, n_genes_in_region=len(cols), dosage_slope=dosage_slope,
+                             design_version=4 if gain_mode in ('fixed_library', 'abundance') else 3 if gain_mode == 'depth_neutral' else 2,
+                             replication_unit='source cell line; cells and simulation seeds are not biological replicates'))
         X.eliminate_zeros()
         write_h5(out / f'counts_r{r}.h5', X, genes, cell_ids)
         c.to_csv(out / f'cells_r{r}.tsv', sep='\t', index=False)
@@ -122,4 +164,11 @@ def main(inp, out, gain_mode='depth_neutral'):
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('input')
+    parser.add_argument('out')
+    parser.add_argument('mode', nargs='?', default='fixed_library',
+                        choices=['fixed_library', 'abundance', 'thin_outside', 'depth_neutral'])
+    parser.add_argument('--dosage-slope', type=float, default=1.0)
+    args = parser.parse_args()
+    main(args.input, args.out, args.mode, args.dosage_slope)

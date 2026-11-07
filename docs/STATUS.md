@@ -1,5 +1,94 @@
 # Haplodose: status, decisions and open work
 
+## Membership uncertainty and merging (2026-11-07)
+
+The [membership investigation](MEMBERSHIP_2026-11-07.md) traces the three remaining
+failures and tests two proposed corrections. The supported chr12 profile contrast
+survives refinement in seed 20261108, but reassignment and hard-pool merging remove
+the distinction. Stable MAP labels do not certify convergence; using all eight
+refinement rounds nevertheless reduces recovery from 2/5 to 1/5 and worsens the
+observed error/power tradeoff. That default change is rejected and preserved as a
+negative result. The retained implementation records actual refinement rounds,
+explicitly uncertified stopping status, and conditional pair-membership entropy
+for merge decisions. It does not interpret a merge as genomic equality.
+
+Integrating uncertain memberships improves conditional prediction on the selected
+cases, but the complete binned-search event gate fails in both split modes. In the
+mode-matched thinning experiment it has 10/200 state-null flags, a simultaneous
+30-endpoint upper bound of 11.26%, and zero detections in 200 alternatives. This is
+an RNA event statistic, not a validated clone caller; initial group contrasts and
+public gene/reference preprocessing are not fully covered. No replacement rule
+or biological calibration claim is promoted.
+
+Compute job 22850847 passes 315 Python tests (one GPU-only skip) and four Rust
+tests; three targeted statistic checks also pass (two overlap the full suite).
+The unchanged five-case panel remains 2/5, with all three failures preserved.
+Independent audits verify input identity, counts, confidence bounds and observer
+invariance. A different CPU generation changes experimental proposal eligibility
+in two specimens; the original-host replay and first failed hash audit are both
+retained. Cross-hardware numerical certification remains unresolved.
+
+## Recovery causes and error/power replay (2026-11-07)
+
+The [cause investigation](RECOVERY_CAUSES_2026-11-07.md) repairs a failed optimizer
+status that discarded a numerically recoverable proposal. The identical objective
+is retried with SLSQP and must pass all previous numerical certificates. Compute
+job 22846715 passed 311 Python tests (one GPU-only skip) and four Rust tests.
+The original scientific assertions, generators and frozen results are preserved.
+
+Complete recovery remains 2/5: all three previously failing cases still fail.
+One restored proposal is later merged; two others fail confirmation because
+assigned pools dilute the contrast. Post-fit truth-group probes and a gene-level
+known-nuisance oracle distinguish this from complete absence of measurement
+information, but do not provide deployable labels or nuisance estimates.
+Neither reference-derived depth slopes nor removing programmes improves recovery.
+Normal-cell errors in one case worsen from 9/90 to 10/90; this is retained.
+
+The paired 998-fit regression replay and independent count/bound audit leave the
+false-split/power result unchanged: the state-calibrated gate has 8/200 errors
+(simultaneous upper bound 8.96%) and 65/200 detections (lower bound 24.34%).
+The 5% target remains unmet. RNA-equivalent transcriptional-state and CNA
+explanations also prevent a biological identity claim without independent evidence.
+No additional scientific default or calibration claim is promoted.
+
+## Recovery and uncertainty follow-up (2026-11-07)
+
+The original thinning recovery regression is repaired without changing its test,
+seed or scientific criteria. Final candidate 5 passed 310 Python tests (one skipped)
+and four Rust tests in compute job 22844951. On five frozen simulation inputs,
+the preserved baseline passed 0/5 original recovery assertions and the correction
+passed 2/5, without a new failing criterion. The other failures remain evidence
+of limited recovery. This is not a biological validation panel.
+
+The [follow-up report](RECOVERY_2026-11-07.md) records the numerical corrections,
+complete binned-search false-distinction experiment and the separate optional
+systematic-RNA interval contract. The latter requires independently fixed
+expectations, known covariance and fixed genomic eligibility. Existing approximate
+SEs remain scale diagnostics; automatic inference does not acquire a calibration
+claim from the new helper. Historical evidence and decisions below are preserved.
+State-calibrated global testing still fails the clone criterion: 8/200 false
+distinctions, simultaneous upper bound 8.96%, and 65/200 detections. The optional
+known-covariance intervals covered all 1,000 simulations at each of six endpoints,
+but were wide and often insensitive. Neither result establishes biological validity.
+
+## Schema-2 correctness and scientific validation (2026-11-06)
+
+Current development follows the [scientific contract](SCIENTIFIC_CONTRACT.md) and
+[0.2 migration](MIGRATION_0.2.md). The historical entries below are preserved as
+records of decisions and outcomes, not renewed claims for the revised method.
+Former evaluation cohorts are regression-only. No suitable unopened biological
+panel has been verified for a 5% specimen false-split guarantee.
+
+The initial dirty source was captured before edits under
+`dev/hardening_20261106_2119/baseline`, with its Git state, file hashes and selected
+frozen-result hashes alongside it. The isolated baseline wheel passed Rust 3/3
+and Python 99 passed/1 skipped on compute job 22811740. Independent baseline
+counterexamples (job 22812061) nevertheless reproduced invalid constant-reference
+rank, an incorrect responsibility-weighted programme objective, accepted
+fractional/duplicate inputs and lost integer aggregation precision. Candidate
+validation and scientific falsifiers are recorded in new task directories;
+passing these does not establish biological clone identity or error control.
+
 Written 2026-11-01. Covers work from 2026-10-31 to 2026-11-01. Plan file:
 `~/.claude-teams/plans/t3-infercnv-like-caller-handoff-dapper-cat.md` (milestones M0-M4).
 Git: one commit `d6ed692` (2026-11-01 08:35), made while 2 tests were failing.
@@ -104,6 +193,10 @@ A claim holds only if its decision rule is met on data not used to develop the m
    difference above 0. Secondary, descriptive: precision/recall of called differences, RNA vs DNA clone counts.
    The SPECTRUM scorer is written and hashed on Andor development data before any SPECTRUM RNA output is read.
    Bian scTrio: `ari_all` against same-cell DNA clone labels (DNA clusters from the re-derived CN), descriptive.
+   Bian provenance note (2026-11-02): the CRC project (~/CRC src/46-49, results/bian_*) has processed Bian DNA
+   (raw DNA alignment, DNA clones, alleles, chr11p) for the IGF2 question; no RNA CNV caller or HaploDose was run on
+   Bian there (grep of src/46-49 and results/bian_*). HaploDose development has not used Bian. Bian stays secondary
+   and descriptive.
    Claim 3 amendment (same day, before the score stage ran): descriptive per-protocol (Stranded) sensitivity
    added (`results/ccle_bulk_20261102_1551/README.md`).
    **Claim 3 result (read once, 2026-11-02, frozen 14:24 code, `results/ccle_bulk_20261102_1551/score/primary.json`):
@@ -123,9 +216,58 @@ A claim holds only if its decision rule is met on data not used to develop the m
    Metrics = the paper's Pearson correlation and gain/loss AUC per dataset. With n = 4, no test can pass Holm,
    so the rule is descriptive: SOTA = best mean rank over the 4 datasets on both metrics, against all six tools.
    Reported whatever the outcome.
+   Claim 5 amendment (2026-11-02 ~21:00, before any Schmid run or Schmid content was read; from reading the
+   authors' code at commit 319ea34, `benchmarks/schmid/PLAN.md`): (a) "both metrics" is three numbers: Pearson,
+   AUC gains, AUC losses; SOTA = best mean rank over 3 metrics x 4 primary datasets; the paper's normalised score
+   reported descriptively. (b) Ranked against all 9 outputs the paper ranks (inferCNV, SCEVAN and Numbat each as
+   CNV and Expr, plus copyKat, CONICSmat, CaSpER). (c) Primary scoring = the authors' combined scorer with
+   HaploDose added (it intersects bins across methods; frozen HaploDose is autosomal, so chrX drops for all);
+   sensitivity = the per-method scorer and the comparators without HaploDose. (d) Gate before HaploDose is scored:
+   our comparator reruns reproduce the published comparator values on one primary dataset; if not, report the gap.
+   (e) A375 and HCT116 are DNTR-seq (plate-based full-length): HaploDose there is an untested modality, reported
+   as such. (f) External normal references fixed (best match to the authors' unnamed files; deviation recorded):
+   COLO320 = gut cell atlas Full_obj_raw_counts_nosoupx_v2.h5ad, Diagnosis "Healthy adult", Region "LargeInt",
+   category "Epithelial", atlas row order, then R set.seed(1); sample(1:n, 5000) (n = 38,612); REC and APD excluded,
+   no rectum sensitivity. MCF7 = Tabula Sapiens TS_Mammary raw_counts, method "10X", compartment "epithelial"
+   (5,630 cells). The selected cell IDs are saved and used by every tool. CellRanger 8.0.1 here vs 7.0.0 in the
+   paper (same refdata-gex-GRCh38-2020-A), recorded as a deviation. Comparators run in a separate env pinned to
+   the paper's versions (`schmid_r41`, user-approved 2026-11-02).
+   (g) Gate pass rule for (d): our rerun of each comparator output is within 0.05 of the published value on Pearson,
+   AUC gains and AUC losses (values transcribed from the paper's Source Data before the rerun). An output that misses
+   is still ranked, flagged, and the gap reported. SCEVAN pinned to commit 92761f6 (last 1.0.1); if SCEVAN misses the
+   gate, it is rerun once at the v1.0.1 tag 90b45b9 and the closer of the two is used, both reported.
+   Exposure note (2026-11-02 ~22:20): while transcribing published comparator values, an agent's glob printed the
+   first 4 rows (chr1, ~1 Mb) of the paper's published truth-track Source Data (supp fig 19A-C: MM, BCC06,
+   BCC06post). Published data; no HaploDose run or tuning followed. Numbat 1000G hg38 panel: official pklab file
+   unreachable (bot check); CRC-built chr1-22 panel used (their phasing uses chr1-22 only), recorded as a deviation.
 
 Known risks: Numbat is ranked first in recent benchmarks (Chang 2026, Song 2025) and is absent from MIX-seq;
 TCGA arm level is currently a loss to the naive gene ratio (not a target claim).
+
+## Held-out MIX-seq result (read once 2026-11-02 ~22:30; full numbers in docs/heldout_protocol.md "Results")
+
+Claim 1 does NOT hold. n = 127 lines. Haplodose median arm rho 0.832 beats infercnvpy, CopyKAT and SCEVAN (Holm
+over 5, all p_holm < 1e-4) but ties R inferCNV (0.823, p_holm 0.15) and is below pseudobulk (0.840, p_holm 0.006).
+E2 implant clone recovery (n = 47): no superiority to any tool; R inferCNV highest (0.223 vs 0.136).
+SOTA count after this read: claim 3 holds; claim 1 fails; claims 2, 4, 5 open. Three wins now need all of
+claims 2, 4 and 5, or a new prespecified independent benchmark.
+
+## Seed, node and GPU stability of the frozen 14:24 code (2026-11-02, development data)
+
+Kinker single-line design, 181 line specimens, `results/kinker_seeds_frozen1424_20261102_1545` (v6 seeds 20261031, 1-4;
+v4 seeds 20261031, 1; GPU b6k seed 20261031):
+- Arm dosage is stable: median per-line rho 0.853-0.856 across all 8 runs (pseudobulk 0.863); per-line rho range
+  across the 5 v6 seeds median 0.014, max 0.053. v4 vs v6 at the same seed: |rho diff| max 0.004; GPU vs CPU max 0.015.
+- Clone counts are NOT stable: only 47.5% of lines get the same clone count in all 5 v6 seeds; 21% switch between
+  1 and > 1 tumour clones by seed alone. Same seed, other hardware: clone count equal for 99.4% (v4) and 93.4% (GPU).
+Andor 9 gastric lines, `results/andor_frozen1424_20261102_1542` (same 7 CPU runs):
+- SNU-601 (15 DNA clones): difference AUROC 0.78-0.84 across seeds, precision 0.70-0.76, recall 0.84.
+- Over-splitting where DNA is clonal or near clonal: MKN-45 (1 DNA clone) 2 RNA clones in every run; NUGC-4 (1 DNA
+  clone) 4-6; SNU-16 (2 DNA clones) 7-10 RNA clones with 21-29 arms called different (precision 0.03-0.04).
+  HGC-27 difference AUROC ranges 0.29-0.71 by seed.
+Consequence: the frozen clone step over-splits and is seed-sensitive; the clone-identity estimand (claim 4) depends
+on v-next (count splitting plus a calibrated split null). Dosage claims are unaffected. Node dependence is small
+at fixed seed; seed dependence is the larger effect and is reported as a limitation of the frozen version.
 
 ## Takeover review, 2026-11-02 ~15:30 (supersedes "Current state" below where they differ)
 
@@ -143,8 +285,17 @@ One session now owns the whole repo (HaploDose1/2 lanes in `docs/HANDOFF_2026-11
   `JAX_ENABLE_X64=1` changes nothing there. v4 with x64 still fails the Potts test (22611904/05). Reading
   [Inference]: the fixture sits on hard thresholds (posterior 0.95, split score > 0, Jaccard 0.7) and BLAS/XLA
   rounding tips it. Node dependence is to be measured (seed and subsample refits) and stated as a limitation.
-- **Stale numbers to rerun on frozen code**: the U-CAN bulk table predates the leave-one-out normals fix and was
-  not rerun. Gambardella 2022 (GSE173634) is no longer the second held-out set: rejected (lines from different
+- **U-CAN bulk rerun on frozen 14:24 code** (`results/ucan_bulk_frozen1424_20261102_1612`, development data;
+  replaces the older table): n = 1,034 tumours (28 skipped, NA purity/ploidy), per-tumour arm Spearman rho vs
+  FACETS. Median rho: HaploDose arm calls 0.627, HaploDose dose 0.649, naive 0.630, infercnvpy 0.566. Paired
+  Wilcoxon, Holm over all 6 pairs: HaploDose calls vs naive p = 0.81 (no difference); HaploDose dose > naive
+  p_holm = 1e-9; both HaploDose outputs > infercnvpy p_holm < 1e-15.
+- **Normal-cell false-split null** (`results/normals_null_frozen1424_20261102_1554`, frozen code, development
+  data): held-out normal-epithelium cells as query, pooled across patients. SMC 536 cells / 10 patients, Moorman
+  750 cells / 20 patients: 0 malignant calls, 1 clone (normal), 0 false splits in both. Easy null (same cell type
+  as the reference); harder nulls (DNA-clonal lines, seed refits) still pending. Summary recomputed with the
+  corrected parser: `null_summary_v2.tsv` (the original `null_summary.tsv` miscounted tumour-clone cells).
+- Gambardella 2022 (GSE173634) is no longer the second held-out set: rejected (lines from different
   donors, bulk truth only); claim 4 uses SPECTRUM and Bian 2018. Manuscript outline: `docs/manuscript_outline.md`.
 - **Test count**: 52 test functions, 61 cases with parametrisation, plus 3 Rust tests. The "70/70" in the handoff
   and "61" here count differently; quote 61 Python cases. README is not edited (standing rule) and is stale.
@@ -764,3 +915,631 @@ RNA against patient DNA log ratio, Haplodose arm median vs prototype:
 | `chr19_genes.py` | gene-level view of whole-chromosome splits |
 | `smc_window_check.py`, `window_shapes.py` | programme high-pass checks |
 | `cnloh_dbg.py`, `spatial_dbg.py`, `ycc_alleles.py`, `prog_test_seeds.py`, `smc_subset.py` | simulation and allele debugging |
+
+## Claim 2 (peak memory) result, 2026-11-03
+
+Rule (fixed above): lowest median peak memory among all tools that finish, at every size from 20k cells up.
+Summary: `results/scaling_combined_20261103_0102/summary.tsv` (benchmarks/scaling/summarise.py over symlinks: frozen 14:24 HaploDose runs plus
+08:19 comparator runs; pre-freeze HaploDose runs excluded). Peak = sacct MaxRSS, median of 3 repeats (1 at 1M), cpu
+v6, 16 CPUs. Unit = run.
+
+| cells | HaploDose GiB | infercnvpy | R inferCNV | CopyKAT | SCEVAN |
+|---|---|---|---|---|---|
+| 20k | 2.47 | **2.44** | 11.7 | 64.7 | 128 |
+| 50k | **3.52** | 4.67 | 28.9 | 171 | OOM at 200G |
+| 100k | **4.50** | 9.28 | 63.7 | did not finish | OOM |
+| 1M | **11.1** | 103.5 | not run | not run | not run |
+
+**Claim 2 does NOT hold as prespecified**: at 20k, infercnvpy is 0.025 GiB (1%) lower (corrected 2026-11-03 from 0.026; medians 2.4653 vs 2.4403) (per-run HaploDose 2.27,
+2.47, 2.47; infercnvpy 2.44, 2.44, 2.42). HaploDose is lowest from 50k up, and about 9x lower at 1M. This is
+reportable as a descriptive result, not as a prespecified win. The 20k gap is within run-to-run spread for
+HaploDose, but the rule was a point comparison of medians and is not relaxed after the fact. The GPU arm
+(`haplodose_gpu`) uses more host memory than the CPU arm (20k 3.29, 100k 5.53, 1M 12.9 GiB).
+
+## v-next gate result, 2026-11-03
+
+`results/vnext_gate_20261102_2154/analysis/summary.json`. Both null arms fail criteria (a) and (b) and pass
+(c), (d) and (e). Seed stability (a): evenodd_null 0.475, thin_null 0.464, against 0.80 needed. That matches the
+frozen code (0.475). DNA-clonal lines (b): MKN-45 has 2 RNA clones in every evenodd_null seed, and NUGC-4 has
+4-6. In evenodd_null, 3,645 of 3,659 null tests passed, and the null maximum was 0 in 3,466 of them. The likely
+cause [Inference] is a one-clone NB null that is too clean: it lacks cell-level and regional variation beyond
+the fitted programmes. v-next is not adopted. The diagnosis and a revised null are with the vnext-splits agent,
+on development data only, with the same gate criteria.
+
+SOTA count: claim 3 holds; claims 1 and 2 fail; claims 4 (needs a v-next that passes the gate) and 5 are open.
+Three wins now require both 4 and 5.
+
+## Claim 6 prespecified 2026-11-03 (user decision: CPTAC bulk backup), before any CPTAC data was downloaded
+
+Survey from metadata only: `dev/cptac_survey_20261103_0612/survey.md` (GDC release 46.0). No CPTAC expression or
+copy-number file had been downloaded when this was written.
+
+6. **Focal (sub-arm) loss detection in tumour bulk RNA, CPTAC-3.** This replicates claim 3 on primary tumours that
+   were not used in development (0 of 2,164 CPTAC case ids are in TCGA).
+   - Code: HaploDose = frozen 14:24 (`results/heldout_20261102_1424/code`, hash-checked), with the same bulk flags as
+     CCLE. infercnvpy = `benchmarks/tcga_bulk/subarm_infercnvpy.py`. Naive gene ratio = as in `subarm.py`.
+   - Scorer: `benchmarks/tcga_bulk/subarm.py` unchanged, driven like `benchmarks/ccle_bulk/score.py`: hg38 gene
+     positions (Ensembl 112), hg38 UCSC arms, random tie-break.
+   - Truth: GDC CPTAC-3 WGS AscatNGS "Allele-specific Copy Number Segment" (GRCh38). `Copy_Number` gives total CN.
+     Ploidy = length-weighted mean total CN over chr1-22 (the claim 3 rule). Definitions are as in claim 3: focal =
+     segment shorter than 25% of its arm with |TCN - ploidy| >= 1; DNA-neutral = |TCN - ploidy| < 0.5.
+   - RNA: STAR - Counts unstranded column, primary tumour only. Per case, use the RNA file whose sample list
+     contains the ASCAT tumour sample. If several qualify, take the smallest GDC file_id. If none qualify, exclude
+     the case. Pooled-aliquot files (2-5 tumour samples) are kept if they contain the ASCAT sample, and a
+     sensitivity analysis excluding them is reported.
+   - Groups: one per cohort: CCRCC, UCEC, LUAD, GBM, CM, STAD, PDAC, HNSCC, LSCC. AML is excluded (no normals);
+     CPTAC-2 is excluded (no CN).
+   - Normal panel: every Solid Tissue Normal STAR - Counts file of that cohort, one per case (smallest file_id),
+     including matched and normal-only cases. Minimum 10 normals per cohort, otherwise the cohort is excluded
+     (GBM has 17). The same panel is used for all three methods.
+   - Unit: tumour (case), counting tumours with >= 1 focal-loss window. Primary: focal-loss recall at 5% realised
+     FPR, HaploDose dose vs naive and vs infercnvpy. Paired Wilcoxon signed-rank; Holm over these 2.
+   - SOTA criterion: both Holm p < 0.05 and mean paired difference > 0. Also reported: bootstrap 95% CI of the mean
+     difference (10,000 resamples of tumours, seed 20261103). Descriptive only: per cohort, and excluding
+     pooled-aliquot RNA.
+   - Caveats stated in advance:
+     - Tumour RNA contains stroma, and ASCAT TCN is purity-corrected while RNA is not, which lowers recall for
+       every method.
+     - GDC marks AscatNGS as deprecated, so the downloaded files are checksummed and kept.
+     - This is a second bulk claim (same endpoint as claim 3), not a new modality.
+   The scorer, its input builder and their hashes are written before any CPTAC data is opened. Data are fetched
+   only after this section exists.
+
+## Claim 4 SPECTRUM amendment, 2026-11-03, before any SPECTRUM scRNA was opened or any tool was run on it
+
+Scorer frozen at `results/spectrum_scorer_20261103_0613/`: `eval_code_sha256.txt` passes; the Andor match is 20/20,
+with patient AUROC equal to stored andor item 2 for 5 SNU-601 runs. Eligible patients = 28 of 39
+(`eligible_patients.tsv`), from the DLP+ clone tables only.
+- Excluded: 9 patients with fewer than 2 tumour clones; OV-007 with no differing arm.
+- Added exclusion: OV-081. Its WGD clone differs from the non-WGD clones on all 44 arms, so no arm is truth 0 and
+  the AUROC is undefined. This is a mechanical consequence of the endpoint, decided from DNA only.
+- Compound leaf labels such as '0/2' are single published clones (cluster_info and branch_info) and are kept.
+  Cells with an empty leaf_id are dropped.
+Development context (Andor SNU-601, development data, not evidence for claim 4): patient AUROC is 0.779 for
+HaploDose frozen, 0.845 for R inferCNV and 0.766 for infercnvpy.
+
+## v-next gate 2 result, 2026-11-03
+
+`results/vnext_gate2_20261103_0612/analysis/summary.json`: covariance (SigClust-style) split null, `--split-null-model
+cov`. Criteria (a)-(e) are the same as gate 1. Neither arm passes.
+
+| criterion | cov (null on splits) | cov_initial (also gates the initial groups) |
+|---|---|---|
+| (a) same clone count across 5 seeds, >= 0.80 of 181 lines | 0.519 fail | **0.917 pass** |
+| (b) MKN-45 / NUGC-4 one clone in >= 4 of 5 seeds | MKN-45 2,2,2,2,2; NUGC-4 1,4,5,1,5: fail | MKN-45 2,2,2,2,2 (fail); NUGC-4 1,1,1,1,1 (pass) |
+| (c) SNU-601 diff AUROC median >= 0.80 | 0.818 pass | 0.839 pass |
+| (d) implant mean ARI >= 0.147 (n = 166) | 0.150 pass | **0.074 fail** (paired Wilcoxon vs evenodd p 3e-4, nominal) |
+| (e) dosage median rho >= 0.85 every seed | pass | pass |
+
+Gating the initial groups makes clone counts stable, but it halves subclone recovery: the stability comes from
+calling fewer clones. MKN-45 gets a split-born second clone (about 8% of cells) under every null tried. That
+clone cannot be checked against the scDNA, which has 771 cells and an arm sd of 0.30. This was predicted in the
+gate 2 README before the run. Runtime is at most 46 min per run, with a peak of 2.8 GiB.
+
+## v-next frozen for claim 4, 2026-11-03 (user decision, before any SPECTRUM scRNA was opened)
+
+`results/vnext_freeze_20261103_0744/` (read-only code + SHA-256). This is the gate 2 'cov' arm:
+`--split-mode evenodd --split-null-draws 19 --split-null-model cov`. It was frozen even though it failed gate
+criteria (a) seed stability (0.519) and (b) MKN-45. Those failures are reported as limitations of the clone
+estimand, together with the gate 2 table above. Claim 4 runs this code once on the 28 eligible SPECTRUM patients,
+with the frozen scorer `results/spectrum_scorer_20261103_0613/`. The reference-cell rule and tool settings are
+written below before any tool runs.
+   Amendment to claim 6, 2026-11-03, made before any input, group or score stage ran (no CPTAC value read; only GDC
+   metadata and md5 checks):
+   (i) a case with several ASCAT segment files uses the smallest file_id;
+   (ii) cohort = GDC primary site + disease type mapped to the 9 cohorts; cases fitting none are excluded (1 melanoma
+   case with a urinary primary site).
+   The eval-code hashes were written before the download (`results/cptac_bulk_20261103_0618/eval_code_sha256.txt`).
+   Of 4,528 files, 4,508 passed md5 on the first fetch; the remaining 20 are being re-fetched (job 22626342).
+   Cases whose files never verify are excluded and counted.
+Caveat on the frozen 'cov' null, from the vnext-splits diagnostics (`dev/vnext_null3_20261103_0123/out/`): it keeps
+a simulated true chr12 subclone only narrowly (null max 7.40 vs observed 7.86). It only partly stops false splits:
+it rejects the first splits in NUGC-4 and SNU-16, but not in MKN-45. The changed code is
+`python/haplodose/clones.py` (`region_effect_covariance`), `cli.py` and `tests/test_split_null.py`. pytest on v6
+(job 22624614): 95 passed, 1 skipped. Not committed.
+
+## Claim 4 SPECTRUM run rules, 2026-11-03 (fixed before CellRanger or any CNV tool ran on SPECTRUM scRNA)
+
+Plan: `dev/spectrum_run_plan_20261103_0750/plan.md` (code SHA-256 in `code_sha256.txt` there, checked at every job
+start). Only metadata has been read: the GEO cell table, SRA run lists and DLP+ clone tables.
+- **Patients:** n = **21**, not the 28 above. Seven DNA-eligible patients (OV-004, 006, 044, 046, 129, 133, 139)
+  have no CD45-negative or UNSORTED tumour scRNA, so they fail the "tumour scRNA" part of the rule.
+  `paired_test.py` gets `patients_with_scrna.tsv`. Samples: 71 of 74. Three samples with no published cell labels
+  are excluded; each of those patients keeps other samples.
+- **Reference cells:** the same for every tool. They are the authors' published non-cancer labels (T, B, plasma,
+  myeloid, dendritic, mast, endothelial, fibroblast), pooled over the patient's samples, up to 300 per type
+  (seeded), split 50/50 fit/holdout.
+- **Query cells:** cells labelled Ovarian.cancer.cell, up to 3,000 per sample (seeded). Each tool's own
+  malignant call then applies as in the frozen scorer: comparators use `--rule cluster`, HaploDose uses its own call.
+- **Counts:** CellRanger 8.0.1, GRCh38-2020-A, at the authors' barcodes.
+- **Tools:** HaploDose v-next frozen (`vnext_freeze_20261103_0744`, cov flags, seed 20261031, no alleles) = primary.
+  Comparators: infercnvpy, CopyKAT, SCEVAN, Numbat (GRCh38 1000G phase 3 panel; this is a deviation from "same
+  panel as Kinker", which is hg19). XClone and CalicoST are not installed, so they are not run.
+  HaploDose with `--alleles` is descriptive only (the allele path was not gated).
+- **Failures:** a tool that fails or makes no call for a patient scores AUROC 0.5. Failures are counted per tool
+  (frozen `paired_test.py`). Expected in advance: Numbat on OV-031, which has 43 reference cells.
+- **Test:** unchanged. Paired Wilcoxon over the 21 patients, HaploDose vs each of the 4 comparators, Holm over 4.
+  SOTA = every Holm p < 0.05 with the bootstrap 95% CI of the mean difference above 0.
+- **Caveat [Unverified]:** how the authors labelled cancer cells (markers vs CNV inference) is not checked. If CNV
+  signals were used, the query set favours CNV-rich cells for every tool alike.
+
+## Claim 6 (CPTAC-3 bulk) result, 2026-11-03
+
+Run: results/cptac_bulk_20261103_0618 (score job 22627305, frozen 14:24 code, eval code hashed before any CPTAC
+file was opened). Primary as prespecified: focal-loss recall at 5% FPR, paired Wilcoxon over tumours with >= 1
+focal-loss window, Holm over 2 (hd_dose vs naive, hd_dose vs infercnvpy). n = 618 tumours (unit: CPTAC-3 case) of
+1,553 scored across 9 cohorts; all 1,553 input tumours were scored (the survey listed 1,579; 26 dropped at input
+building by the aliquot/ASCAT rules).
+
+| comparator | mean HD | mean comp | diff | 95% CI (bootstrap) | HD>/</= | Holm p |
+|---|---|---|---|---|---|---|
+| naive | 0.542 | 0.514 | +0.028 | -0.003 to 0.060 | 229/184/205 | 0.025 |
+| infercnvpy | 0.542 | 0.407 | +0.136 | 0.109 to 0.163 | 279/107/232 | 4.3e-21 |
+
+Claim 6 HOLDS under the prespecified rule (both Holm p < 0.05, both mean diff > 0). Caveat to report: the margin
+over the naive gene ratio is small and its bootstrap CI of the mean crosses 0 (the Wilcoxon tests ranks, the CI
+tests the mean). Per-cohort results are descriptive (e.g. CCRCC vs naive -0.011). Same sign excluding pooled-RNA
+cases (n = 508, Holm p 0.033 and < 1e-15). Test recomputed independently from per_patient.tsv.gz: p match.
+Correction 2026-11-03 (from docs/scientific_code_review_2026-11-03.md F10): the claim 6 table first gave 2e-21 for
+infercnvpy under "Holm p"; that was the raw p. Holm-adjusted p = 4.3e-21. Decision unchanged.
+
+## Claim 4 amendment 2026-11-03 13:30 (before any CNV tool ran on SPECTRUM scRNA)
+
+Trigger: docs/scientific_code_review_2026-11-03.md F6. The run rules above say "Holm over 4", but the frozen
+paired_test.py put a comparator in the Holm family only if it scored at least one patient, so a comparator that
+failed everywhere dropped out and SOTA could be declared against a subset. Reconciled to the stricter written rule:
+- Family fixed at infercnvpy, CopyKAT, SCEVAN, Numbat, whatever they output. XClone and CalicoST removed from the list
+  (not installed, never part of the claim).
+- New: SOTA also requires each of the 4 to have scored output for >= 50% of the 21 patients. Otherwise claim 4 is
+  "not established", since a comparator that fails everywhere sits at 0.5 and is beaten trivially.
+- New, descriptive: the same tests over patients where both tools scored (no 0.5 fill). Completion per tool is
+  reported next to the test.
+Not changed: endpoint, 0.5 fill, Wilcoxon, CI rule, patients. Old script kept as
+dev/spectrum_run_plan_20261103_0750/paired_test_20261103_0613.py. Validation and new hashes:
+results/spectrum_scorer_20261103_amend_1328.
+Review F5 (a missing arm counts as 0 difference, which can raise AUROC) is not changed in the primary. A
+common-arm sensitivity is to be added before any SPECTRUM tool output exists, or else disclosed as post hoc.
+Pointer: benchmarks/spectrum/run_tool.sbatch SCORER now results/spectrum_scorer_20261103_amend_1328; plan hashes redone (old: code_sha256_20261103_1340_pre_amend.txt).
+
+## Claim 4 amendment 2, 2026-11-03 13:38 (before any CNV tool ran on SPECTRUM scRNA)
+
+Review F5 addressed as a descriptive sensitivity, primary unchanged. score.py writes a 'measured' flag per arm
+(>= 2 kept tumour clones with a value); paired_test.py adds `sensitivity_common_arms`: per patient, AUROC over the
+arms both tools measured, Wilcoxon over patients where both are defined, Holm over the 4. Validation 22/22:
+results/spectrum_scorer_20261103_amend2_1338 (job 22632075). run_tool.sbatch SCORER now points there; plan hashes
+redone (old: code_sha256_20261103_1345_pre_amend2.txt). Old scripts kept in dev/spectrum_run_plan_20261103_0750/.
+Review F1 (NaN assignments after a small clone is dropped): the frozen code cannot change, so after the SPECTRUM HaploDose runs, count non-finite posteriors in each cells.tsv.gz and report them next to the result. Fixed before any output.
+
+## Kinker Numbat comparator, development data, 2026-11-03 (job 22612086)
+
+results/kinker_numbat_20261102/score_all_20261103_1424 (log: score_all_22612086.out). Numbat on 181 single-line
+specimens: 146 ok, 26 no clones after the size filter, 9 failed. Line-level dosage rho (unit = cell line), HaploDose
+(frozen field run) vs Numbat over the 146 scored lines (35 missing): median 0.861 vs 0.818 (the same HaploDose median 0.861 appears in every pair, so it may be over all 181 lines; not checked), median paired diff +0.031 (95% CI 0.027 to 0.050), HaploDose higher in 116, Numbat in
+30, Holm p 8.5e-15 (Holm over the 6 pairs with haplodose). Clone false splits: Numbat reports a median of 4 tumour
+clones (IQR 3-6) per single-line specimen where 1 is expected; one clone in 7 of 146. Development evidence only
+(Kinker was used in development); not a SOTA claim.
+Claim 4 run started 2026-11-03 20:28 in waves (operational only, analysis unchanged): results/spectrum_run_20261103_2028/README.md. Wave 1 = 7 patients; watcher job 22642637 submits the rest and the paired test.
+
+## Claim 5 frozen code, 2026-11-03 ~20:40 (user: "use whatever is best"; before any HaploDose run on Schmid data)
+
+Primary: v-next freeze results/vnext_freeze_20261103_0744/code with the claim 4 flags
+(--split-mode evenodd --split-null-draws 19 --split-null-model cov), seed 20261103, other settings per
+benchmarks/schmid/PLAN.md item 4 (value log_ratio_gene, reference holdout 0.3, CPU). Reason: same method as claim 4,
+so the paper reports one current method for the single-cell claims. Descriptive sensitivity, not part of the claim:
+the 14:24 freeze (results/heldout_20261102_1424/code) with CLI defaults. The v-next README line "claim 4 only" is
+superseded by this entry. Gate (amendment d/g) still precedes any HaploDose scoring.
+Clarification (before any run started): in the v-next primary arm, seed 20261103 is passed both to the HaploDose CLI (--seed) and to the wrapper's reference split. This differs from claim 4, which used the CLI default 20261031; seeds are arbitrary and both were fixed before any Schmid run. The 14:24 sensitivity arm keeps the CLI default seed. Jobs: v-next 22642692-95, 14:24 22642696-99.
+
+### Claim 5 gate deviations, 2026-11-04 (written before the gate rerun; no comparator or HaploDose value read)
+
+First gate runs 22642665 (BCC06), 22642666 (BCC06post), 22642667 (MCF7) ended COMPLETED in Slurm, but snakemake
+failed in 4 rules on all three, so no evaluation ran and there is no gate table. copyKat, SCEVAN, BAFExtract and the
+Numbat pileup succeeded. Fixes (team-lead approved 1, 3, 4; 2 waits for the user):
+1. inferCNV: reticulate loaded `~/.local/share/r-miniconda` python (no igraph). `run_gate.sbatch` now sets
+   `RETICULATE_PYTHON` to the schmid_r41 python (igraph 0.9.9, leidenalg 0.8.9). No user-level config changed.
+2. Numbat: `run_numbat` fails in plotting (`Ops.data.frame`), most likely ggplot2 3.5.0 vs their 3.4.1 [Inference].
+   Not fixed; the reinstall waits for the user. Until then the gate reruns with `NO_NUMBAT=1`: their evaluation rule is
+   copied with only the numbat_obj input removed (`benchmarks/schmid/gate/make_nonumbat_rule.py`; their
+   `evaluate_results.R` skips Numbat when that input is NULL). Numbat bins then do not enter the combined bin intersection,
+   so those rows are provisional; the gate (amendment g) is final only after a run with Numbat.
+3./4. CONICSmat and CaSpER annotations: biomaRt 2.50.3 cannot query Ensembl now (HTTP 404; BiocFileCache/dbplyr error).
+   Release: Ensembl 113 (`oct2024.archive.ensembl.org`). Basis: their commit 41dfa38 (2025-03-25) set the CONICSmat host
+   to www.ensembl.org "#currently: GRCh38.p14", and 113 was current on that date; the CaSpER script uses the www default
+   with no date, so 113 is used for both [Inference]. Raw BioMart tables (query XML, URL, date, md5) are downloaded once and
+   subset to the genes as `getBM(filters = "hgnc_symbol")` would; the code after getBM is copied verbatim
+   (`benchmarks/schmid/annot/`). Assumption: the unfiltered table keeps the server's row order that getBM would return,
+   which matters only for duplicated symbols [Inference].
+Also: `run_gate.sbatch` now exits non-zero when snakemake fails and writes `gate_comparison.tsv` itself.
+
+Update 2026-11-04 (after the no-Numbat reruns 22645303/4 failed; before the final gate runs; no gate value read):
+- Fix 1 replaced. reticulate 1.27 ignores RETICULATE_PYTHON's conda handling here: for a conda python it takes the conda
+  binary from the env's `conda-meta/history` (`~/.local/bin/conda`, absent). The gate now points RETICULATE_PYTHON at a
+  job-local symlink to the env python (`OUT/pyshim/bin/python`), which reticulate treats as a plain python. Tested in
+  job 22647316 (igraph 0.9.9 and leidenalg import). No user-level config changed.
+- Fix 2 (user-approved): the Numbat error is patchwork 1.1.2 (their yml) with ggplot2 3.5.0 (reproduced in 22647316
+  with a guides-collect plot). ggplot2 3.4.1 was approved first and then withdrawn, because ggraph 2.2.0 (needed by
+  numbat) requires ggplot2 >= 3.5.0. Installed instead: patchwork 1.2.0 from the Posit CRAN snapshot 2024-02-29, in
+  schmid_r41 only; ggplot2 stays 3.5.0. Package list and sessionInfo before and after are in the fix run dir. Deviation
+  from their yml (patchwork 1.1.2).
+- Fix 5 (approved): CaSpER's `casper.R` reads `@assays$RNA@data`, which Seurat 5.0.1 (Assay5) lacks. The gate's working
+  copy of `casper.R` gets one line after `library(Seurat)`: `options(Seurat.object.assay.version = "v3")` (tested in
+  22647306). The original is kept as `casper.R.orig` and the diff is written to each gate dir.
+- The final gate runs include Numbat and their unchanged evaluation rule (not NO_NUMBAT). The no-Numbat route is dropped.
+
+### Claim 5 gene-position file fix, 2026-11-04 ~09:30 (team-lead decision; no evaluation output had been written)
+- Gate 22647673 (BCC06post) failed only in `evaluate_cnv_prediction_wes`; every method rule had finished. Their
+  `lib.R` reads gene positions with `data.table::fread` (1.14.8, as in their yml). fread stops at line 82 of
+  `external/annotations/hg38_gencode_v27.txt` (md5 0c08b487706b2b8362470570d5b9eeb8). That line (TNFRSF18) has one
+  trailing tab: 5 fields, while the other 56,608 lines have 4. fread keeps 81 genes, then IRanges fails on NA.
+- New copy `external/annotations/hg38_gencode_v27_fixtab_20261104.txt` (md5 53909a1213b591c12894222cc47b6b03) strips
+  that tab. The diff is that one line only, with 56,609 lines in both files. md5s are in
+  `hg38_gencode_v27_fixtab_20261104.md5`. The original file is unchanged.
+- Only the evaluation rules use the copy: the 14 `infercnv_gene_pos` inputs in the gate's working-copy `workflow.sm`.
+  The method rules (inferCNV `gene_pos`) keep the original. R `read.table` (header=FALSE, row.names=1, sep="\t"), the
+  call inferCNV makes [Inference: from the inferCNV gene-order reader, not re-read here], gives identical data frames
+  for both files (checked 2026-11-04). So the finished method outputs are unaffected. HaploDose read the original
+  file and is left as run.
+- Repair: `benchmarks/schmid/gate/rerun_eval.sbatch` reruns only the evaluation rule in an existing gate dir. It
+  stops unless a snakemake dry run plans exactly that one job. BCC06post: job 22650125. BCC06, MCF7 and COLO320 get the
+  same repair if their evaluation fails the same way. `run_gate.sbatch` now applies the copy from the start (diff
+  written to OUT/workflow_fixtab.diff). Gates submitted earlier keep the script they were submitted with. So MM199
+  gate 22649741 is replaced by 22650126, which is held like its predecessor.
+
+### Claim 5 MM199 control-cluster rule, 2026-11-04 ~09:00 (team-lead decision; written before prep 22649737 ran; no marker table, comparator output, HaploDose output or truth file read)
+- Their `prepare_MM_sciCNV_scran.Rmd` (lines 249-250) labels Seurat clusters `c(4,6,8)` at resolution 0.5 as
+  "control" and all other clusters as "MM". It states no numeric threshold. It lists markers only: "Specific MM marker
+  genes: B2M, CCND1, Immunoglobulins (IGHM, IGKC)", "Additional marker used in the Numbat paper for MM: MZB1",
+  "Additional marker used in the Casper paper for MM: SCD1, CD38" (lines 227-233). So the thresholds below are ours.
+- Our clustering (CellRanger 8.0.1, Seurat 5.0.1) may number clusters differently. Rule, fixed now: the paper's control
+  is the non-plasma immune clusters. A cluster is control if its fraction of PTPRC-positive cells (count > 0) is
+  >= 0.5 and its SDC1-positive and MZB1-positive fractions are each < 0.2. These fractions come from
+  `MM_cluster_marker_check.tsv` written by `benchmarks/schmid/prep/prepare_MM.R`, computed on the cells kept after
+  their QC.
+- If this marker set equals `{4,6,8}` exactly, their labels stand. Otherwise the marker-defined set is used for all
+  comparator tools and both HaploDose arms. This is recorded as a deviation, and the HaploDose jobs (22649739, 22649740)
+  and the gate (22649741) are rerun on the relabelled input in new dirs. If the marker set is empty, nothing is run on
+  MM199 and the case is reported.
+- No truth file is read for this decision.
+- Outcome, 2026-11-04 10:22 (prep 22649737; `results/schmid_inputs_MM_20261104_0849/MM_cluster_marker_check.tsv`):
+  the rule gives control = {8} (32 cells; PTPRC 0.78, SDC1 0.06, MZB1 0.13). Their {4,6,8} does not match. Cluster 4
+  is plasma-like (MZB1 1.00, SDC1 0.70, PTPRC 0.01), so the numbering has shifted. Clusters 5 and 6 are PTPRC-high and
+  SDC1-low but fail MZB1 < 0.2 (0.38, 0.25), so the rule labels them MM. Applied as written: control = {8} for all
+  tools and both HaploDose arms. Deviation. The rule is not changed after seeing the table.
+  Rerun: prep 22651203 (`results/schmid_inputs_MM_ctrl8_20261104_1023`), then determinism check 22651205 (count
+  matrix byte-identical and the same marker table as 22649737). Then HaploDose 22651206 (vnext) and 22651207
+  (sens1424), and gate 22651208. The annotation from 22650110 is reused: it depends on genes only, and the check
+  requires an identical matrix. Superseded held jobs 22649739, 22649740, 22650126 (with 22649738, 22649741) need a
+  user `scancel`.
+
+### Claim 4 run incident, 2026-11-03 ~21:00 (no outputs read)
+
+- Scoring failed for the 14 wave-1 haplodose and infercnvpy jobs. `results/spectrum_scorer_20261103_amend2_1338/` had no
+  `dna_clones/` (the amendment validation jobs skipped `dna_clones.py`). The tools had finished. Fix: `dna_clones/` in both
+  amend dirs is now a symlink to `results/spectrum_scorer_20261103_0613/dna_clones` (`dna_clones.py` unchanged, DNA-only).
+  Job 22642879 (`results/spectrum_run_20261103_2028/rescore_wave1.sbatch`) runs `score.py` on the recorded run dirs; no
+  tool is rerun. Later waves use the symlink directly.
+- infercnvpy on SPECTRUM-OV-031 failed by the frozen runner rule "at least 20 fit and 20 held-out reference cells" (the
+  patient has 43 reference cells; HaploDose ran with 24/19). By the protocol it scores as no_output. This rule is in our
+  wrapper, not in infercnvpy itself, so the result is reported with `sensitivity_both_scored` alongside the primary. The rule
+  is not changed after the run.
+
+### Package fixes from review 2026-11-03 (F1, F7, F8), development code only
+
+Not in any frozen copy: claims 4 and 5 run `results/vnext_freeze_20261103_0744/code` (SHA-256 checked), which these edits
+do not touch.
+- F1: in `clones.py` EM, cells whose responsibilities sum to 0 or are non-finite after a clone is dropped are
+  renormalised in log space. A cell with no finite likelihood falls back to the mixture weights. All other cells are
+  unchanged. These cells skip the spatial smoothing term.
+- F7/F8: fractional counts are rejected in `io.py`, `clones.thin_counts` and allele AD/DP. `bulk.py` checks sample IDs,
+  negative, non-finite and zero-total samples. `pipeline.check_identities` rejects empty query IDs and specimens that
+  span more than one patient or dataset (reference cells are not checked).
+- Tests: `tests/test_review_20261103.py` (4 new). Job 22642671, ne1dc6-010: 99 passed, 1 skipped; the new tests
+  fail 4/4 on the pre-fix copy. Logs: `dev/review_fixes_20261103_2032/`.
+- 2026-11-04 ~08:35: patchwork 1.2.0 installed in schmid_r41 by job 22649569 (`external/schmid_env/fix_patchwork_20261104_0828/`;
+  `r_packages.diff` shows patchwork 1.1.2 -> 1.2.0 as the only change; ggplot2 3.5.0; patchwork smoke test passed). The job
+  exited 1 only because its Numbat smoke test called snakemake with a wildcard target (a test bug, not an env failure). The
+  four final gates 22647672-75 had their dependency removed by hand; the Numbat rule inside each gate is the real check.
+- **Claim 5 gate, BCC06post: PASS** (2026-11-04, `results/schmid_gate3_BCC06post_20261104_0641/gate_comparison.tsv`,
+  evaluation rerun 22650125 with the fixtab gene file). Rule (g): every comparator output within 0.05 of the published value
+  on Pearson, AUC gains and AUC losses. 27/27 within 0.05 (9 outputs x 3 metrics); largest gap CONICSmat Pearson 0.041
+  (0.218 vs 0.177); all other gaps <= 0.009. HaploDose for BCC06post may now be scored; that requires the other primary
+  lines for the claim itself (best mean rank over 3 metrics x 4 primary datasets).
+- **Claim 5 MM199 control sensitivity, declared 2026-11-04 ~10:35, after the marker table and before any MM199 gate or
+  HaploDose number exists.** The prespecified rule (PTPRC >= 0.5, SDC1 < 0.2, MZB1 < 0.2) gave control = {8}, 32 cells,
+  not the authors' three clusters. Clusters 5 (178 cells) and 6 (152) are PTPRC-high and SDC1-low but MZB1 0.38 and 0.25;
+  MZB1 is also expressed in some non-plasma B cells, so the MZB1 cutoff I set was probably too strict [Inference]. The
+  primary stays as prespecified: control = {8}. One sensitivity is added, fixed now: control = {5,6,8} (PTPRC >= 0.5 and
+  SDC1 < 0.2, MZB1 dropped). Both run through the gate and HaploDose with everything else identical, and both are reported.
+  Neither is chosen by its result: the primary is {8} whatever the gate shows.
+- Exposure note 2026-11-04 ~10:40: while checking the file format, an agent printed the header and first 2 gene rows of the
+  BCC06post HaploDose vnext gene_by_clone output (two clone log ratios). No truth file was read, no metric computed, and
+  no decision depends on it. Scoring job prepared, not submitted: `benchmarks/schmid/score/run_score_all.sbatch`
+  (combined scorer primary, per-method sensitivity; refuses to run unless every gate row is within 0.05 or a written override
+  exists). Fixture test 22651292 replaces HaploDose with copyKat's pseudobulk and must match copyKat's rows to 1e-9.
+- **Claim 5 gate, BCC06: 26/27 within 0.05** (2026-11-04, `results/schmid_gate3_BCC06_20261104_0641/gate_comparison.tsv`,
+  evaluation rerun 22651591 with the fixtab gene file). One miss: Numbat CNV Pearson 0.184 vs published 0.235 (gap 0.051,
+  just past the 0.05 rule). Per rule (g), numbat_cnv on BCC06 is still ranked, flagged gate_miss, and the gap reported.
+  No rerun of Numbat is made to close the gap (the rule gives a second run only to SCEVAN). Cause not investigated before
+  scoring; candidates are Numbat run-to-run variation and our env deviations (patchwork 1.2.0, CellRanger 8.0.1) [Speculation].
+- **Claim 5 MCF7 Numbat failure and missing-output ranking rule, 2026-11-04 ~16:45 (team-lead decision; written before any
+  HaploDose number on any Schmid line exists; MCF7 is line-overlap, not primary).** In gate 22647674 `run_numbat` failed
+  on MCF7: "Found 3 normal cells.. Running HMMs on 7 cell groups.. Error in smooth_segs(., min_genes = min_genes) : No
+  segments containing more than 10 genes for CHROM 13,18,21,22." Numbat is not rerun. Deviation: MCF7 is evaluated with
+  a copy of the authors' rule `evaluate_cnv_prediction_wgs` with only the `numbat_obj` input removed
+  (`benchmarks/schmid/gate/make_nonumbat_rule.py`, output to `evaluation_nonumbat/`); their scorer handles a NULL Numbat
+  object. The evaluation-only guard is the same as `rerun_eval.sbatch`: a dry run must plan exactly one job of the
+  no-Numbat rule, so no method reruns. The HaploDose MCF7 scoring also drops the Numbat input. In `gate_check`, Numbat
+  (CNV) and Numbat (Expr) on MCF7 are gate_miss with no output (ours = NA; published values exist: Pearson 0.300 and
+  0.615). Ranking rule, new (PLAN.md and the claim 5 text above define none; the claim 4 "failure scores AUROC 0.5" rule
+  is a different claim and is not used here): an output that is missing for a dataset and metric ranks last on that
+  dataset and metric; ties among several missing outputs share the last ranks (average rank). Correction to the 10:40
+  note above: the scorer no longer requires every gate row within 0.05; per (d)/(g) it stops only if no primary line
+  passes fully, keeps misses ranked and flagged, and skips a line with no gate table.
+- **Claim 5 gate, MM199 sensitivity control {5,6,8}: 25/27 within 0.05** (2026-11-04, `results/schmid_gate3_MM_ctrl568_20261104_1027/gate_comparison.tsv`).
+  Misses: CONICSmat Pearson 0.391 vs 0.539 (gap 0.148); CaSpER AUC gains 0.629 vs 0.693 (gap 0.064). Both flagged and ranked
+  under rule (g). This is the sensitivity arm; the primary MM199 arm (control {8}, gate 22651208) is still running. The
+  primary stays {8} whichever arm reproduces better.
+- Claim 4 run, 2026-11-04 ~16:50: SCEVAN on SPECTRUM-OV-009 (job 22651351) was OOM-killed at its frozen 128G after 1.6 min
+  (R child killed, 5 oom_kill events). score.py wrote status no_output, which paired_test scores 0.5 by the protocol. Not rerun
+  with more memory: the protocol runs each tool once at fixed resources, and a rerun chosen after the failure would be a
+  post-hoc change. It counts against SCEVAN's completion (MIN_COMPLETION 0.5) and is excluded in `sensitivity_both_scored`.
+- **Claim 5 gate, MM199 primary control {8}: 21/27 within 0.05** (2026-11-04, `results/schmid_gate3_MM_20261104_1023/gate_comparison.tsv`).
+  All misses are CONICSmat and CaSpER, on every metric: CONICSmat Pearson 0.109 vs 0.539, AUC gains 0.794 vs 0.868, losses
+  0.665 vs 0.792; CaSpER Pearson 0.039 vs 0.391, gains 0.640 vs 0.693, losses 0.665 vs 0.773. inferCNV, copyKat, SCEVAN
+  and Numbat (both outputs) pass. Under rule (g) both are ranked and flagged gate_miss. The sensitivity arm {5,6,8} misses
+  less (CONICSmat Pearson only 0.148, CaSpER gains 0.064), consistent with a 32-cell reference hurting the two tools that
+  use the reference most directly [Inference]. The primary stays {8}, as fixed before either gate result existed.
+- **Claim 5 gate, MCF7 (line-overlap): 21/21 non-Numbat rows within 0.05** (largest gap SCEVAN CNV AUC losses 0.012;
+  `results/schmid_gate3_MCF7_20261104_0641/gate_comparison.tsv`, no-Numbat evaluation 22653989). Numbat failed (3 normal
+  cells; smooth_segs error), so its 6 rows are NA and count as gate misses, ranked last per the 16:45 rule.
+
+### Claim 4 result (SPECTRUM, read 2026-11-04 22:10, paired test job 22652272)
+
+Prespecified outcome: **claim 4 fails.** HaploDose is not superior to any of the 4 required comparators.
+Source: `results/spectrum_run_20261103_2028/primary/{primary.json,per_patient.tsv}`.
+
+- Endpoint: clone-difference AUROC per patient (score.py level=patient). n = 21 patients; unit = patient.
+- Test: paired two-sided Wilcoxon over patients; Holm over the 4 required comparators (infercnvpy, CopyKAT, SCEVAN, Numbat). Missing output scored 0.5. Bootstrap 95% CI of the mean difference, 10,000 patient resamples, seed 20261103.
+- Completion: all 4 comparators passed MIN_COMPLETION 0.5. Failures scored 0.5: infercnvpy 1 (OV-031), SCEVAN 1 (OV-009, OOM), Numbat 1 (OV-031), CopyKAT 0, HaploDose 0.
+- Mean AUROC: HaploDose 0.647, CopyKAT 0.646, SCEVAN 0.645, Numbat 0.626, infercnvpy 0.601.
+
+| vs | mean diff | 95% CI | HD higher / lower | raw p | Holm p |
+|---|---|---|---|---|---|
+| infercnvpy | +0.047 | -0.003 to 0.097 | 14 / 6 | 0.100 | 0.402 |
+| CopyKAT | +0.001 | -0.043 to 0.048 | 10 / 11 | 0.973 | 1.0 |
+| SCEVAN | +0.003 | -0.115 to 0.100 | 13 / 8 | 0.374 | 1.0 |
+| Numbat | +0.021 | -0.025 to 0.070 | 11 / 8 | 0.573 | 1.0 |
+
+- Descriptive sensitivities (both-scored only; common arms) give the same conclusion: no Holm p below 0.68.
+- Per-patient AUROC below 0.5 for HaploDose: OV-002 (0.305) and OV-050 (0.047; SCEVAN 0.977 on the same patient). Reported, not investigated for tuning; SPECTRUM stays an evaluation set.
+- Review F1 check: non-finite clone_posterior or p_normal among assigned cells = 0 in all 42 HaploDose runs (21 primary, 21 alleles). assignment_margin is empty for 8,870 cells in 5 single-clone specimens (OV-009 1, OV-065 3, OV-075 1); the margin is undefined with one clone, so these are not F1 NaNs.
+- Interpretation: on this endpoint HaploDose is at parity with CopyKAT and SCEVAN and numerically above infercnvpy and Numbat, without statistical support. Claims status now: holds 3 (CCLE bulk), 6 (CPTAC-3 bulk); failed 1, 2, 4; claim 5 pending.
+
+### Claim 5 scorer fixture, 2026-11-05 00:30 (operational, no HaploDose output read)
+
+- Fixture v5 (22653951) hit its 8 h limit in case A; no verdict. Each scored run takes about 2.3 h per HaploDose arm (2 arms), so case A alone needs about 18 h.
+- Fixture v6 (22690386) submitted through `submit_frozen.sh` with the current scorer (adds the Numbat-NA case and case C, MCF7 line_overlap), `--time=72:00:00` on the command line. Code copy and sha256: `dev/schmid_claim5_20261103/score_fixture_v6_20261105_0030/code/`.
+- The all-lines scoring job (6 runs x 2 arms, about 28 h [Estimate]) will be submitted with `--time=90:00:00` on the command line; the 24 h in the `run_score_all.sbatch` header is too short. Timing only; no rule changes.
+
+### Claim 5 scoring fan-out, 2026-11-05 (user: "full fan out jobs as much as you need"), written before submission
+
+- Scoring is submitted now, in parallel with fixture v6, one `run_score_all.sbatch` job per run_id, each from its own
+  `submit_frozen.sh` copy. The scorer tree is byte-identical to the fixture v6 copy (`diff -r` clean at submission).
+- Blindness: no shard output is opened until fixture v6 reports FIXTURE_PASS on that same code. If v6 fails, every
+  shard is discarded unread and rerun after the fix; that is recorded here.
+- Gate rule (d)/(g) is unchanged. The stop rule needs one primary run passing every gate row. For shards whose own run
+  does not pass every row, the map adds an anchor row `BCC06post_gateanchor` (the real BCC06post gate table, which
+  passes 27/27) with HaploDose paths `none`, so the anchor is listed in `skipped_runs.tsv` as haplodose_output_missing
+  and never scored. The run's own gate rows are flagged exactly as in a single job.
+- COLO320 gets its shard when its gate table exists.
+- 2026-11-05 11:26: COLO320 gate 22647675 finished every method rule, then its evaluation stopped on the GENCODE line 82
+  trailing tab (same as BCC06/BCC06post; the job predates the fixtab fix). Evaluation-only rerun 22724842
+  (`gate/rerun_eval.sbatch`, frozen copy in the gate dir); scoring shard 22724843 afterok on it. Shard 22721980 had
+  started afterany on the gate, found no gate table and exited (NO_RUN_READY); nothing scored.
+- 2026-11-05 ~13:50: COLO320 scoring shard 22724843 stopped in its first step ("object 'loss_wgs' not found"): score_one.R
+  passed no params for COLO320, but their rule evaluate_cnv_prediction_cnvkit_COLO320 sets genomic_format = "CNVkit"
+  (workflow.sm at 319ea34). No COLO320 score was produced. Fixed in score_one.R (backup dev/score_one_pre_cnvkitfix_20261105.R);
+  the change touches only the COLO320 branch, so the five running shards (BCC06, BCC06post, MM x2, MCF7) get identical
+  params. Fixture v6 does not exercise COLO320, so a COLO320 fixture (22725812, score/test/run_fixture_colo320.sbatch,
+  copyKat stand-in, HaploDose == copyKat, CaSpER flagged) runs on the same frozen code as the new shard 22725813.
+  COLO320 scores are read only after both fixture v6 and the COLO320 fixture pass.
+
+### Claim 5 ranking script frozen, 2026-11-05 ~20:20 (before any HaploDose score file was opened)
+
+- `benchmarks/schmid/score/rank_claim5.R` sha256 87a3f5c4f3d81f6c5f006aa150824157c24ec93398550001b2956cffebd9e5e2. Per dataset and metric (Pearson vs truth from the corr table,
+  AUC gains, AUC losses), 10 outputs ranked (1 = best), ties average, missing output last (average among missing).
+  SOTA = HaploDose strictly lowest mean rank over 3 metrics x 4 primary datasets (BCC06, BCC06post, COLO320, MM_ctrl8);
+  a tie for first is not SOTA. Descriptive: normalised overall score (Pearson floored 0, (AUC-0.5)x2 floored 0, max F1).
+  Sets reported: primary (combined scorer, vnext arm); sensitivities: MM_ctrl568 in place of MM_ctrl8, per-method
+  scorer, sens1424 arm; MCF7 line-overlap separately.
+- Tested on fixture tables (copyKat stand-in; no HaploDose output): `dev/schmid_claim5_20261103/rank_test_20261105_2010/`.
+  HaploDose ties copyKat exactly; a removed Numbat output ranks 10th.
+- 2026-11-05 ~22:00: COLO320 fixture 22725812 FIXTURE_PASS (58 checks; HaploDose stand-in == copyKat in every flagged table, CaSpER flagged, CNVkit truth used). dev/schmid_claim5_20261103/score_fixture_colo320_20261105_1303/check_fixture.log
+- 2026-11-06: fixture v6 22690386 FIXTURE_PASS (236 checks; case exits A 0, B 3 as expected, C 0). Scores may now be read.
+
+### Claim 5 result (Schmid et al. 2025 benchmark, read 2026-11-06 ~00:10, ranking job 22737628)
+
+Prespecified outcome: **claim 5 fails.** HaploDose has the worst mean rank of the 10 outputs on the primary set.
+Source: `results/schmid_claim5_rank_20261106_0003/{summary,verdict,per_dataset}_{combined,permethod}.tsv`
+(frozen `rank_claim5.R` sha256 87a3f5c4…; scores from `results/schmid_score_claim5_20261105_0836/`, after fixture v6 and
+the COLO320 fixture passed).
+
+- Unit = dataset; n = 4 primary (BCC06, BCC06post, COLO320, MM199 control {8}); 3 metrics (Pearson vs DNA truth, AUC
+  gains, AUC losses); 10 outputs. Descriptive rule, no test (n = 4), as prespecified.
+- Primary (combined scorer, v-next arm) mean rank: inferCNV (Expr) 3.33, Numbat (Expr) 4.04, copyKat 4.12, Numbat (CNV)
+  4.25, inferCNV (CNV) 5.25, CaSpER 5.42, CONICSmat 6.25, SCEVAN (CNV) 6.83, SCEVAN (Expr) 7.08, **HaploDose 8.42**.
+  Normalised overall score (descriptive): HaploDose 0.246, lowest; comparators 0.278 to 0.364.
+- Per dataset HaploDose Pearson / AUC gains / AUC losses: BCC06 0.164 / 0.582 / 0.583; BCC06post 0.138 / 0.598 / 0.540
+  (last on all three); COLO320 0.187 / 0.652 / 0.490; MM199 0.282 / 0.645 / 0.652. Pearson is about half of copyKat's
+  on BCC06post, COLO320 and MM199.
+- Sensitivities, same conclusion: MM199 control {5,6,8} 8.50 (last); 14:24 arm 8.42; per-method scorer 8.00
+  (9th of 10; best inferCNV (Expr) 3.62). MCF7 line-overlap (separate): HaploDose 7.67, 8th of 10 (Numbat outputs
+  missing, ranked last).
+- Checks before accepting: HaploDose gene coordinates match the hg38 annotation used by the scorer (EGFR, MYC, GAPDH,
+  TP53 identical); Pearson and AUC are scale-free, so the +2 offset in read_haplodose cannot change ranks; the two
+  HaploDose arms differ in values but not in ranks. Not investigated for tuning: Schmid stays an evaluation set.
+- Interpretation: on external single-cell data with DNA truth, HaploDose's clone-level dosage profile tracks DNA copy
+  number less well than every comparator output. This agrees with claim 1 (MIX-seq profile below a pseudobulk baseline).
+- Claims status: hold 3 (CCLE bulk), 6 (CPTAC-3 bulk); fail 1, 2, 4, 5. The prespecified SOTA goal (>= 3 wins) is not met.
+
+## Claim 7 prespecified 2026-11-06 (user "do all"), before any REBC-THYR data was downloaded
+
+Survey from GDC metadata only: `dev/claim7_survey_20261106/survey.txt`. Every TCGA cohort with >= 10 solid normals
+was used in development (`benchmarks/tcga_bulk`), and CPTAC-3 is claim 6. The only other GDC project with open
+AscatNGS, primary-tumour STAR - Counts and >= 10 Solid Tissue Normal RNA files is REBC-THYR (radiation-related
+papillary thyroid cancer; 449 AscatNGS WGS segment files, open; 437 primary tumour and 400 solid normal RNA files).
+
+7. **Focal (sub-arm) loss detection in tumour bulk RNA, REBC-THYR.** Third replication of the claim 3/6 endpoint on
+   tumours not used in development.
+   - Everything is as claim 6 (code, scorer, truth, RNA file rule, normal-panel rule, pooled sensitivity, test,
+     Holm family, bootstrap seed), except: project REBC-THYR; one group THYR (primary_site thyroid gland, disease
+     type adenomas and adenocarcinomas).
+   - Unit: tumour (case) with >= 1 focal-loss window. Primary: focal-loss recall at 5% realised FPR, HaploDose dose vs
+     naive and vs infercnvpy, paired Wilcoxon signed-rank, Holm over these 2. SOTA criterion: both Holm p < 0.05 and
+     mean paired difference > 0.
+   - Power floor, stated in advance: papillary thyroid cancers carry few copy-number changes, so many tumours may
+     have no focal-loss window. If fewer than 20 tumours qualify, claim 7 is reported as not evaluable, which counts
+     as not won. The number of qualifying tumours is not looked at before the run.
+   - Code: `benchmarks/rebc_bulk/` wraps `benchmarks/cptac_bulk/` (project and cohort only). Eval code hashes are
+     written before the fetch.
+   - Caveats in advance: as claim 6 (stroma, purity-corrected truth vs uncorrected RNA, AscatNGS deprecated). Most
+     normals are matched to a tumour, as in CPTAC. A thyroid win would replicate claims 3 and 6 on a third bulk
+     cohort; it is not a new modality.
+   - Run 2026-11-06: eval code hashed in `results/rebc_bulk_20261106_0649/eval_code_sha256.txt` (claim 6 hashes re-checked OK) before any
+     download. Manifest `data/external/rebc_thyr_20261106/files.tsv`: 442 AscatNGS and 837 RNA files after the THYR
+     map (survey count 449 included cases outside that map), 3.6 GB, all open. Jobs: fetch 22759847 (io), then
+     input 22759934, group 22759935, score 22759936 (afterok chain, cpu v6 preferred, 8 CPU 48G each).
+
+## Profile-gap diagnosis, 2026-11-06 (development data only: Kinker; Schmid not reopened)
+
+`dev/profile_gap_20261106_0007/` (job 22737862; `out/summary.json`, `out/paired_tests.tsv`). Question: why does
+HaploDose rank last on Schmid's bin-level Pearson when its arm-level rho on Kinker beats CopyKAT? n = 181 Kinker
+single-line specimens (unit = cell line); truth = DepMap relative CN as in `benchmarks/kinker/evaluate.py`.
+Paired Wilcoxon vs `hd_lrg`, Holm within each metric over 6 pairs.
+- Arm rho (median): hd_lrg 0.861, pseudobulk 0.863, CopyKAT 0.812. No gap at arm level.
+- 1 Mb Pearson (Schmid-like): hd_lrg 0.619 (the output exported to Schmid, log_ratio_gene), hd_dose 0.659,
+  CopyKAT 0.672, hd_lrg after a 5-bin running median 0.696 (higher than hd_lrg in 152/181 lines, Holm p < 1e-20).
+- Roughness along the genome: hd_lrg 0.369, truth 0.290, CopyKAT 0.052, hd_lrg_sm5 0.091.
+- Reading: the bin-level gap comes mostly from bin-to-bin noise in the exported output, not from a wrong
+  arm-level signal. A smoothed export would likely close it on Kinker [Inference for Schmid; not tested there,
+  and Schmid stays closed for tuning]. Any smoothed export is a new version that must be frozen and evaluated only
+  on unopened data.
+- Agent report details (same run): smoothed HaploDose is above CopyKAT in 114/181 lines (median +0.017); arm rho
+  stays 0.863. CopyKAT here is Schmid's input (mean of CNA_raw_results_gene_by_cell), hence 0.812, not 0.765. Winsorising
+  does not change the gap (0.614), so outliers are not the cause. The holdout on/off comparison was not run. The 5-bin window was picked
+  after seeing these results, so a smoothed export is a new version. It would be frozen on Kinker, checked on
+  Andor, and evaluated only on unopened data.
+
+## Claim 8 (Bian scTrio) survey, 2026-11-06: not a confirmatory claim
+
+`dev/bian_claim8_survey_20261106_0654/survey.md` (no RNA tool run).
+- There are 609 same-cell trio cells in 6 patients. DNA CN exists for only 140 of them (CRC01 and CRC11), and those cells were selected with RNA markers. The existing clone labels use RNA-informed features. At the existing cut, each patient has one dominant DNA clone.
+- At most 5 evaluable patients. The smallest exact Wilcoxon p at n = 5 is 0.0625, so no per-patient test can pass Holm. A cell-level test would be pseudoreplication.
+- GEO RNA is FPKM/TPM, so it would need STAR + featureCounts. Only 20 normal cells are available as a reference.
+- Blinding: the survey agent read one TPM line and two cells' marker values by accident. The CRC project had already used Bian RNA.
+
+Decision: Bian is not a SOTA claim. At most it is a descriptive cell-level check, after RNA-blind DNA CN is re-derived for all trio cells.
+
+## Claim 7 amendment 1, 2026-11-06, before any claim 7 score was computed
+
+The first run (`results/rebc_bulk_20261106_0649/`) matched only 5 of 383 ASCAT cases to tumour RNA. REBC RNA files
+carry sequencing-centre sample IDs (`SC*_merged`), never the ASCAT tumour sample ID, so the claim 6 rule (RNA file
+whose sample list contains the ASCAT tumour sample) fails on metadata alone. Its score stage crashed (subarm.py
+groupby on an empty curve table, 5 tumours). No score, recall or per-tumour output of that run was read. The 5-tumour
+HaploDose and infercnvpy outputs there are left unread.
+Amendment: cases with no sample-ID match fall back to a case-level match: the case's Primary Tumor STAR - Counts file;
+several -> smallest file_id (8 cases have 2). `selection.tsv` gains column `match` (sample | case).
+Dry run on metadata: 372 tumours (5 sample-matched, 367 case-matched), 400 normals, 0 pooled. Caveat: for the case-matched tumours,
+the RNA and DNA may come from different aliquots of the same tumour (one primary tumour sample per ASCAT case).
+Everything else is unchanged (test, Holm over 2, power floor 20). Rerun: `results/rebc_bulk_20261106_0711/` (eval code re-hashed; builder
+before amendment kept at `dev/rebc_make_input_pre_amend1_20261106.py`). Jobs: input 22760991, group 22760992, score 22760993.
+
+## Claim 7 result (read once, 2026-11-06, `results/rebc_bulk_20261106_0711/score/primary.json`): not evaluable, so not won
+
+Run directory is `results/rebc_bulk_20261106_0711/` (the amendment text above names it via the same variable). 372 tumours, 400 normals.
+Truth: median ploidy 2.00 (IQR 1.99-2.00). Only 6 tumours have >= 1 focal-loss window (10 have a focal gain), below
+the prespecified floor of 20. Descriptive only (n = 6, unit = tumour; Wilcoxon p not computable, < 5 non-zero
+differences; Holm over 2 = 1): focal-loss recall at 5% FPR, mean HaploDose 0.50, naive 0.58, infercnvpy 0.17; 4 of 6
+tumours tie on both comparisons. The power risk stated in advance came true: papillary thyroid cancers are nearly
+copy-number neutral.
+Claims status: hold 3 (CCLE bulk), 6 (CPTAC-3 bulk); fail 1, 2, 4, 5; 7 not evaluable. The prespecified SOTA goal
+(>= 3 wins) is not met. No further unopened GDC cohort meets the claim 6 rules (survey
+`dev/claim7_survey_20261106/survey.txt`), and Bian cannot support a confirmatory claim.
+
+## Claim 8 data survey, 2026-11-06 (metadata only; no claim prespecified)
+
+`dev/claim8_data_survey_20261106_0727/survey.md`.
+- Candidates for a profile claim, with n = cell lines that have DepMap truth and no development overlap:
+  - Gambardella GSE173634 (Drop-seq): 17 lines.
+  - Tahoe-100M DMSO wells (Parse chemistry, new to HaploDose): up to 51 lines [Unverified: which of these were sequenced].
+  - CPTAC-3 scRNA: 30 cases, but 28 have DNA truth already exposed in claim 6.
+- Power from development: on Kinker, smoothed HaploDose beat CopyKAT in 114/181 lines, a median of +0.017 [Inference]. At that rate, 17 lines are unlikely to pass Holm. About 50 lines might.
+- DepMap DNA truth for these lines was likely already used in claim 3 [Inference]. The RNA data are unopened.
+- Nothing is prespecified. It awaits the user's decision.
+- Tahoe-100M metadata (`dev/tahoe_meta_20261106/`):
+  - The cell-line table lists 102 names (99 with DepMap IDs); the obs table, not yet read, says which were sequenced.
+  - There are 14 plates and 31 DMSO samples, at about 2,000 transcripts per cell.
+  - Lines are pooled in each well, which is the MIX-seq design where claim 1 failed against pseudobulk. A fair claim needs a smoothed pseudobulk comparator too [Inference]. Odds of a win look low.
+
+## Claim 8 prespecified 2026-11-06 (user: "Tahoe claim 8"), before any Tahoe expression value was read
+
+Read so far: Tahoe-100M `cell_line_metadata.parquet` and `sample_metadata.parquet`, plus the obs_metadata schema
+(`dev/tahoe_meta_20261106/`). No expression row has been read.
+
+Multiplicity, stated up front: this is the eighth prespecified claim. It was chosen after claims 1-7 were known,
+and after a development diagnosis (profile gap) that motivated its endpoint. All eight are reported.
+
+8. **Relative RNA dosage profile at 1 Mb, pooled cell lines, Tahoe-100M (Parse chemistry, new to HaploDose).**
+   - Cells: DMSO_TF control samples of plate1 (the 2 samples with drug == 'DMSO_TF'; trametinib-solvate samples
+     excluded). Only cells with pass_filter 'full' are used [if that value does not exist, the authors' filter flag is used as is,
+     recorded before any expression is read]. Line = obs cell_name (Tahoe SNP demultiplexing).
+   - Lines: >= 50 cells. At most 300 cells per line, sampled with seed 20261106. DepMap 24Q4 OmicsCNGene available. The
+     design is benchmarks/heldout/prepare_mixseq.py (benchmarks/kinker/prepare.py write_design): one pool, two
+     rotations, half the eligible lines as reference, 70% fit / 30% holdout, seed 20261106.
+   - Primary population: query lines not used in development or earlier claims as scRNA. Excluded: the Kinker,
+     MIX-seq, Andor and Schmid (MCF7, HCT116, A375, COLO320) lines. They can still serve as reference lines. DepMap DNA
+     for most lines was used as truth in claim 3. The RNA is new.
+   - Truth per gene: DepMap CN of the line minus the UMI-weighted mean of the pool's fit reference lines
+     (benchmarks/kinker/evaluate.py). It is averaged into 1 Mb bins. Only bins shared by all methods for that line are kept.
+   - Methods (all from one run of each on the same input):
+     - HaploDose frozen 14:24 code (`results/heldout_20261102_1424/code`, claim 1 flags) with a fixed export:
+       log_ratio_gene, a running median over 5 HaploDose bins within each chromosome, clones weighted by assigned
+       cells. The window was picked on Kinker after seeing the profile-gap result.
+     - CopyKAT: mean over the line's query cells of the gene-by-cell CNA_raw_results.
+     - infercnvpy: mean over the line's query cells.
+     - Smoothed pseudobulk: the evaluate.py pseudobulk, as medians over HaploDose's 10-gene bins, then the same
+       5-bin running median.
+   - Endpoint per query line: Pearson between the method's 1 Mb values and 1 Mb truth. Primary test: HaploDose vs
+     each of the 3 comparators, paired Wilcoxon over lines (unit = cell line), Holm over 3. SOTA criterion: all 3 Holm
+     p < 0.05 and mean paired difference > 0, with bootstrap 95% CI of the mean difference (10,000 resamples of lines,
+     seed 20261106). A comparator that fails on a line scores NaN; that line is dropped from that pair only.
+   - Power floor: fewer than 20 primary lines means not evaluable, which counts as not won.
+   - Scorer: written from `dev/profile_gap_20261106_0007/profile_gap.py`, hashed, and checked on Kinker first. On
+     Kinker it must reproduce that run's hd_lrg_sm5, copykat and pb_bin10 medians to 3 decimals. It is frozen
+     before any Tahoe method output exists.
+   - Caveats stated in advance:
+     - Parse chemistry is new to every method here.
+     - All 50 lines share one well, so the reference is other cancer lines, as in MIX-seq, where claim 1 failed
+       against pseudobulk.
+     - Development evidence predicts small margins (Kinker median +0.017 vs CopyKAT).
+- Scorer fixture on Kinker passed, 2026-11-06 (`dev/claim8_scorer_fixture_20261106_1058/`, job 22774343).
+  - The 1 Mb medians match the profile-gap run to 4 decimals: hd_sm5 0.6964, copykat 0.6725, pb_bin10 0.6353, hd_lrg 0.619.
+  - The infercnvpy reader works (median 0.654). Scorer frozen (read-only): `eaa5c8eaadded527db125149a2dd10525c60f0222ce7529de388dd1213708f6e  benchmarks/tahoe/score_profile.py`.
+- Development prediction, from the same fixture (n = 181 Kinker lines; Holm over 3):
+  - The smoothed pseudobulk baseline beats smoothed HaploDose: median 0.708 vs 0.696, mean diff -0.014, HaploDose
+    higher in only 43/181 lines, Holm p 5e-18.
+  - HaploDose beats CopyKAT (+0.016, Holm p 2e-6) and infercnvpy (+0.028, Holm p 1e-6).
+  - Under the prespecified rule (all 3 must pass), claim 8 would fail on development data. The comparator set is
+    not changed: dropping a baseline because it wins would bias the claim.
+
+## Claim 8 withdrawn 2026-11-06 (user decision), before any Tahoe expression value was downloaded or read
+
+Reason: on development data (Kinker, n = 181 lines), the frozen scorer predicts a fail. Smoothed pseudobulk beats
+smoothed HaploDose (median 0.708 vs 0.696, Holm p 5e-18), and the rule needs HaploDose to beat all 3 comparators.
+Only metadata was fetched (`data/external/tahoe100m_20261106/metadata`, checksummed). The fetch job was cancelled before the
+shard download. Claim 8 is reported as prespecified and then withdrawn, not as a test.
+Final claims status: hold 3 (CCLE bulk) and 6 (CPTAC-3 bulk); fail 1, 2, 4 and 5; 7 not evaluable; 8 withdrawn. The
+prespecified SOTA goal (>= 3 wins) is not met.
+Development finding for the paper: at 1 Mb resolution, a smoothed pseudobulk is a strong baseline that HaploDose's
+profile output does not beat (Kinker). Arm level: HaploDose 0.861 vs pseudobulk 0.863.
+- Tahoe fetch stopped after the footer scan: 76 of 3388 shards would have been needed (~5.4 GB). A partial 8 MB shard download (never read) was deleted.

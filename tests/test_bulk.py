@@ -7,6 +7,9 @@ import pytest
 
 from haplodose.bulk import run_bulk
 
+CONTRACT = dict(counts_kind='raw', genome_build='hg38', coordinate_system='zero-based-half-open',
+                gene_namespace='custom')
+
 
 def _write(tmp_path, n_normals=20, n_chrom=22, per=300):
     rng = np.random.default_rng(7)
@@ -40,7 +43,7 @@ def _write(tmp_path, n_normals=20, n_chrom=22, per=300):
 @pytest.mark.parametrize('bin_stat', ['sum', 'median'])
 def test_bulk_recovers_arm_events(tmp_path, bin_stat):
     """Median mode rebuilds its pseudo counts without each held-out normal, so normals keep a clean null."""
-    out = run_bulk(*_write(tmp_path), tmp_path / 'out', bin_stat=bin_stat)
+    out = run_bulk(*_write(tmp_path), tmp_path / 'out', bin_stat=bin_stat, **CONTRACT)
     arms = pd.read_csv(out / 'arms.tsv', sep='\t')
     t = arms[arms['sample'].str.startswith('T')].set_index(['sample', 'arm'])
     assert t.xs('chr7q', level='arm').call.eq('gain').all()
@@ -50,10 +53,20 @@ def test_bulk_recovers_arm_events(tmp_path, bin_stat):
     assert other.call.ne('neutral').mean() < 0.05
     n = arms[arms['sample'].str.startswith('N')]
     assert n.call.ne('neutral').mean() < 0.05
-    assert json.loads((out / 'run.json').read_text())['arm_calls_calibrated']
+    run_json = json.loads((out / 'run.json').read_text())
+    assert run_json['normal_panel_size'] == 20
+    assert 'normal_panel_size_adequate' not in run_json
+    assert 'arm_calls_calibrated' not in run_json
+    assert run_json['calibration_status'] == 'unvalidated'
+    assert run_json['calibration_method'] == 'none'
+    assert run_json['output_schema_version'] == 2
+    assert 0.0 <= run_json['normal_arm_call_rate_in_sample'] < 0.05
 
 
 def test_small_normal_panel_is_flagged(tmp_path):
-    with pytest.warns(UserWarning, match='not calibrated'):
-        out = run_bulk(*_write(tmp_path, n_normals=3, n_chrom=4, per=200), tmp_path / 'out')
-    assert not json.loads((out / 'run.json').read_text())['arm_calls_calibrated']
+    with pytest.warns(UserWarning, match='No panel size establishes calibration'):
+        out = run_bulk(*_write(tmp_path, n_normals=3, n_chrom=4, per=200), tmp_path / 'out', **CONTRACT)
+    metadata = json.loads((out / 'run.json').read_text())
+    assert metadata['normal_panel_size'] == 3
+    assert 'normal_panel_size_adequate' not in metadata
+    assert metadata['calibration_status'] == 'unvalidated'

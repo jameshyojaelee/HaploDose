@@ -15,17 +15,31 @@ set -euo pipefail
 ROOT=$1 TOOL=$2 N=$3 REP=$4
 I=$ROOT/input O=$ROOT/runs/${TOOL}_${N}_rep${REP}
 test ! -e "$O"; mkdir -p "$O"
-HD=/gpfs/commons/home/jameslee/micromamba/envs/haplodose/bin/python
+HD=${HAPLODOSE_PYTHON:-/gpfs/commons/home/jameslee/micromamba/envs/haplodose/bin/python}
 CNV=/gpfs/commons/home/jameslee/micromamba/envs/scrna_cnv/bin/python
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=16
 echo -e "host\t$(hostname)\nslurm_job\t$SLURM_JOB_ID\ncpus\t$SLURM_CPUS_PER_TASK\nstart\t$(date -Is)" > "$O/job.tsv"
 ARGS=(--counts "$I/counts_$N.h5" --cells "$I/cells_$N.tsv" --positions "$I/positions.tsv")
-set +e
+record_exit() {
+  status=$?
+  printf 'exit\t%s\nend\t%s\n' "$status" "$(date -Is)" >> "$O/job.tsv"
+  trap - EXIT
+  exit "$status"
+}
+trap record_exit EXIT
 case $TOOL in
 haplodose)
-  export PYTHONPATH=$ROOT/code JAX_PLATFORMS=cpu XLA_PYTHON_CLIENT_PREALLOCATE=false
+  export PYTHONPATH=${HAPLODOSE_CODE:-$ROOT/code} JAX_PLATFORMS=cpu XLA_PYTHON_CLIENT_PREALLOCATE=false
+  if [[ ${HAPLODOSE_WHEEL_ONLY:-0} == 1 ]]; then unset PYTHONPATH; fi
   export HAPLODOSE_PROTECTED_PATHS=/gpfs/commons/home/jameslee/CRC:/gpfs/commons/groups:/gpfs/commons/datasets
-  /usr/bin/time -v $HD -s -m haplodose.cli run "${ARGS[@]}" --out "$O/out" 2> "$O/time.txt" ;;
+  HELP=$($HD -s -m haplodose.cli run --help)
+  EXTRA=()
+  if [[ $HELP == *--device* ]]; then EXTRA+=(--device cpu); fi
+  if [[ $HELP == *--counts-kind* ]]; then
+    EXTRA+=(--counts-kind raw --genome-build hg38 --coordinate-system one-based-closed --gene-namespace custom)
+  fi
+  /usr/bin/time -v $HD -s -m haplodose.cli run "${ARGS[@]}" "${EXTRA[@]}" --out "$O/out" 2> "$O/time.txt"
+  $HD -s -c 'import json,sys; q=json.load(open(sys.argv[1])); assert q["backend"] == "cpu", q["backend"]' "$O/out/qc.json" ;;
 infercnvpy)
   /usr/bin/time -v $CNV -s benchmarks/comparators/run_infercnvpy.py "${ARGS[@]}" --out-parent "$O" 2> "$O/time.txt" ;;
 infercnv_r)
@@ -36,5 +50,5 @@ infercnv_r)
 copykat|scevan)
   unset PYTHONPATH PYTHONHOME R_LIBS R_LIBS_USER
   /usr/bin/time -v $CNV -s benchmarks/comparators/run_r_field.py --tool $TOOL "${ARGS[@]}" --out-parent "$O" 2> "$O/time.txt" ;;
+*) echo "Unknown tool: $TOOL" >&2; exit 2 ;;
 esac
-echo -e "exit\t$?\nend\t$(date -Is)" >> "$O/job.tsv"

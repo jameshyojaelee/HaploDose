@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "haplodose"
-version = "0.1.0"
-description = "Haplotype-aware RNA dosage: copy-number clones from single-cell and spatial transcriptomes"
+version = "0.2.0"
+description = "Relative RNA dosage and candidate CNA groups from single-cell and spatial transcriptomes"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [

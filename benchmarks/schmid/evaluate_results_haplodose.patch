@@ -1,0 +1,110 @@
+--- a/snakemake_pipeline/scripts/evaluate_results.R
++++ b/snakemake_pipeline/scripts/evaluate_results.R
+@@ -28,6 +28,13 @@
+ #Source script with help functions
+ source("scripts/lib.R")
+ 
++#HaploDose reader (HaploDose repo: benchmarks/schmid/lib_haplodose.R)
++haplodose_lib<-snakemake@params$haplodose_lib
++if(is.null(haplodose_lib)){
++  haplodose_lib<-"scripts/lib_haplodose.R"
++}
++source(haplodose_lib)
++
+ # ------------------------------------------------------------------------------
+ print("Get input parameters from snakemake")
+ # ------------------------------------------------------------------------------
+@@ -53,6 +60,9 @@
+ input_hb_obj<-snakemake@input$hb_obj
+ 
+ input_numbat_obj<-snakemake@input$numbat_obj
++
++input_haplodose_genes<-snakemake@input$haplodose_genes
++input_haplodose_cells<-snakemake@input$haplodose_cells
+ 
+ input_CONICSmat_filtered_dims<-snakemake@input$CONICSmat_filtered_dims
+ input_CONICSmat_chrom_pos<-snakemake@input$CONICSmat_chr_pos
+@@ -242,6 +252,23 @@
+ }
+ 
+ 
++#Check if HaploDose output files are provided
++if(! is.null(input_haplodose_genes)){
++  print("Load HaploDose results (clone profiles, pseudobulk over non-reference cells)")
++  haplodose_results<-read_haplodose(input_haplodose_genes,input_haplodose_cells,
++                                    input_annot,input_ref_groups)
++
++  num_filtered_res<-rbind(num_filtered_res,
++                          data.frame(method="HaploDose",
++                                     annotated_genes=length(haplodose_results[[1]]),
++                                     annotated_cells=haplodose_results[[2]]))
++
++  combined_range<-combine_range_objects(combined_range,haplodose_results[[1]],
++                                        method_colname="haplodose")
++} else {
++  print("Skipping HaploDose (no output file provided).")
++}
++
+ #Save the combined result data frame for later processing
+ write.table(combined_range,file=output_merged_results,
+             quote = FALSE,row.names=FALSE,sep="\t")
+@@ -279,11 +306,11 @@
+ method_names<-setNames(c(param_genomic_name,"HoneyBADGER (CNV)","HoneyBADGER (Expr)",
+                          "InferCNV (CNV)","InferCNV (Expr)","CaSpER",
+                          "copyKat","SCEVAN (CNV)","SCEVAN (Expr)",
+-                         "Numbat (Expr)", "Numbat (CNV)", "CONICSmat"),
++                         "Numbat (Expr)", "Numbat (CNV)", "CONICSmat", "HaploDose"),
+                        c("wgs_mean","hb_cnv","honeybadger",
+                          "infercnv_cnv","infercnv_expr","casper",
+                          "copykat","scevan_cnv","scevan",
+-                         "numbat","numbat_cnv", "CONICSmat"))
++                         "numbat","numbat_cnv", "CONICSmat", "haplodose"))
+ 
+ #Get results
+ combined_methods<-elementMetadata(combined_range)
+--- a/snakemake_pipeline/scripts/evaluate_results_permethod.R
++++ b/snakemake_pipeline/scripts/evaluate_results_permethod.R
+@@ -25,6 +25,13 @@
+ #Source script with help functions
+ source("scripts/lib.R")
+ 
++#HaploDose reader (HaploDose repo: benchmarks/schmid/lib_haplodose.R)
++haplodose_lib<-snakemake@params$haplodose_lib
++if(is.null(haplodose_lib)){
++  haplodose_lib<-"scripts/lib_haplodose.R"
++}
++source(haplodose_lib)
++
+ # ------------------------------------------------------------------------------
+ print("Get input parameters from snakemake")
+ # ------------------------------------------------------------------------------
+@@ -48,6 +55,9 @@
+ input_scevan_annot<-snakemake@input$scevan_annot
+ 
+ input_numbat_obj<-snakemake@input$numbat_obj
++
++input_haplodose_genes<-snakemake@input$haplodose_genes
++input_haplodose_cells<-snakemake@input$haplodose_cells
+ 
+ # input_CONICSmat_chrom_pos<-snakemake@input$CONICSmat_chr_pos
+ # input_CONICSmat_cnv<-snakemake@input$CONICSmat_cnv
+@@ -210,6 +220,19 @@
+ print("Save final results")
+ # ------------------------------------------------------------------------------
+ 
++#Check if HaploDose output files are provided
++if(! is.null(input_haplodose_genes)){
++  print("Load HaploDose results")
++  haplodose_results<-read_haplodose(input_haplodose_genes,input_haplodose_cells,
++                                    input_annot,input_ref_groups)
++  combined_range<-combine_range_objects(wgs_results,haplodose_results[[1]],
++                                        method_colname="haplodose")
++  res<-get_all_metrics(combined_range,"haplodose")
++  res_per_method<-rbind(res_per_method,res)
++} else {
++  print("Skipping HaploDose (no output file provided).")
++}
++
+ write.table(res_per_method,file=output_res,sep="\t",quote=FALSE,
+             row.names=FALSE)
+ 

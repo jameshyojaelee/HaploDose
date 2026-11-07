@@ -77,6 +77,21 @@ def runs(path, reset):
     return out
 
 
+def credible_difference_runs(path, post, reset, params):
+    """Maximal contiguous difference intervals supported at every retained bin.
+
+    A Viterbi run can include uncertain boundaries. Those boundaries must not
+    erase a sufficiently long interior that already meets the same posterior
+    criterion. A low-support interior bin breaks the interval; it is never
+    bridged or retained by averaging stronger neighbours.
+    """
+    path, post = np.asarray(path), np.asarray(post)
+    support = post[np.arange(len(path)), path]
+    confident = np.where(support >= params.posterior, path, 1)
+    return [(a, b, s) for a, b, s in runs(confident, reset)
+            if s != 1 and b - a + 1 >= params.min_bins]
+
+
 def segment(Y, E, reset, centre, beta, tau, params: ProfileParams, decode=True):
     """Batch HMM over groups. Y, E [G, J]; centre [G]; tau [G] or per bin [G, J]. Returns posteriors, Viterbi
     paths (None when decode is False: fits that use only posteriors skip the decoding pass), mean log dose and
@@ -134,46 +149,115 @@ def group_centres(Y, E, tau):
     return np.array(out)
 
 
-def segments_table(post, path, dose, Y, E, reset, beta, tau, params: ProfileParams, z=3.0):
-    """One row per HMM run, with posterior support and the smallest detectable log dosage.
+def segments_table(post, path, dose, Y, E, reset, beta, tau, params: ProfileParams, z=3.0,
+                   reference_var=None):
+    """One row per HMM run, with explicit RNA-effect units and conditional uncertainty.
 
-    The run mean has se = sqrt(tau^2 / n_bins + 1 / U), U = pooled counts; a shift
-    must exceed z * se to be seen, i.e. a log dosage of z * se / beta.
+    The independent-bin approximation is the variance of the unweighted mean
+    log ratio: sum_j(tau_j^2 + reference_var_j + 1/(Y_j+0.5)) / n_bins^2.
+    It omits parameter estimation, genomic dependence and interval selection;
+    z times this SE is a scale diagnostic, not a power/detection guarantee.
+    log_dose and se_log_ratio are deprecated aliases in RNA log-rate units;
+    The historical detection-limit field is deliberately absent from schema 2.
     """
+    Y, E = np.asarray(Y, np.float64), np.asarray(E, np.float64)
+    tau = np.broadcast_to(np.asarray(tau, np.float64), Y.shape)
+    reference_var = np.zeros_like(Y) if reference_var is None else np.broadcast_to(
+        np.asarray(reference_var, np.float64), Y.shape)
+    if (not np.isfinite(tau).all() or (tau < 0).any() or not np.isfinite(reference_var).all()
+            or (reference_var < 0).any() or not np.isfinite(beta) or beta <= 0):
+        raise ValueError('Segment uncertainty requires finite nonnegative variances and positive beta')
     rows = []
     for a, b, s in runs(path, reset):
         sl = slice(a, b + 1)
         n = b - a + 1
         U = float(Y[sl].sum())
-        se = float(np.sqrt(tau ** 2 / n + 1.0 / max(U, 1.0)))
+        se = float(np.sqrt(np.sum(tau[sl] ** 2 + reference_var[sl] + 1.0 / (Y[sl] + 0.5))) / n)
+        rna_effect = float(dose[sl].mean())
         rows.append(dict(first_bin=a, last_bin=b, n_bins=n, cn_state=int(CN[s]),
-                         state=STATE_LABELS[s], log_dose=float(dose[sl].mean()),
+                         state=STATE_LABELS[s], log_dose=rna_effect,
+                         rna_log_effect=rna_effect, relative_state_log_ratio=rna_effect / beta,
+                         observed_mean_rna_log_ratio=float(log_ratio(Y[sl], E[sl]).mean()),
+                         rna_effect_estimator='HMM_posterior_mean_state_effect',
                          posterior=float(post[sl, s].mean()), pooled_UMI=U,
+                         pooled_count=U, expected_count=float(E[sl].sum()),
+                         count_units='input_count_units',
                          expected_UMI=float(E[sl].sum()), se_log_ratio=se,
-                         min_detectable_log_dose=z * se / beta,
+                         se_rna_log_ratio_approx=se, three_sigma_rna_log_ratio_approx=3.0 * se,
+                         uncertainty_method='independent_bin_log_ratio_approximation',
+                         uncertainty_statistic='unweighted_mean_pseudocount_log_count_ratio',
+                         uncertainty_center_field='observed_mean_rna_log_ratio',
+                         uncertainty_estimand=None,
+                         uncertainty_status='approximate_scale_diagnostic_without_validated_parameter_interval',
+                         posterior_effect_interval_validated=False,
+                         uncertainty_scope='conditional_on_fit_and_selected_interval',
+                         uncertainty_calibrated=False,
+                         uncertainty_scale_z=float(z), scaled_se_rna_log_ratio_approx=z * se,
                          resolved=bool(s != NEUTRAL and n >= params.min_bins
                                        and post[sl, s].mean() >= params.posterior)))
     return rows
 
 
-def difference_segments(Ya, La, Yb, Lb, reset, beta, params: ProfileParams, mask=None, shift=None):
+def pooled_lograte(Y, L, count_variance=None, weight_scale=None):
+    """Conditional Poisson sampling term for weighted counts, with weight-unit smoothing.
+
+    S=sum(wY), Q=sum(w²Y), c=sum(w²)/sum(w). The pseudocount .5*c
+    and variance regularizer .5*c² preserve information under weight rescaling.
+    This is not a correction for NB noise, fitted weights or interval selection.
+    Zero-exposure rows get finite placeholders; callers must mark them untestable.
+    """
+    Y = np.atleast_2d(np.asarray(Y, np.float64))
+    L = np.broadcast_to(np.atleast_1d(np.asarray(L, np.float64)), (len(Y),))
+    Q = Y if count_variance is None else np.broadcast_to(np.asarray(count_variance, np.float64), Y.shape)
+    c = np.ones(len(Y)) if weight_scale is None else np.broadcast_to(
+        np.atleast_1d(np.asarray(weight_scale, np.float64)), (len(Y),))
+    if any(not np.isfinite(x).all() or np.any(x < 0) for x in (Y, L, Q, c)):
+        raise ValueError('Pooled counts, exposure, count variance and weight scale must be finite and nonnegative')
+    if np.any((L > 0) & (c <= 0)):
+        raise ValueError('Positive pooled exposure requires positive weight scale')
+    safe_c = np.where(c > 0, c, 1.)[:, None]
+    adjusted = Y + .5 * safe_c
+    lr = np.log(adjusted / np.where(L > 0, L, 1.)[:, None])
+    v = ((Q + .5 * safe_c ** 2) / adjusted ** 2
+         if not (np.array_equal(Q, Y) and np.all(safe_c == 1)) else 1. / adjusted)
+    lr[L <= 0] = 0.
+    return lr, v
+
+
+def difference_segments(Ya, La, Yb, Lb, reset, beta, params: ProfileParams, mask=None, shift=None,
+                        *, count_variance=None, weight_scale=None):
     """Contiguous copy-number differences between pooled groups a and b.
 
     Inputs are [P, J] for P pairs. The test track uses bins where `mask` is True
     (cross-fitting: proposals are made on the other bins). `shift` [P, J] is the
     expected log-rate difference from known covariates (sequencing depth), removed
     before testing. Returns, per pair, resolved segments (bin indices in the full
-    track) and a distance.
+    track), a distance and `testable`.
+
+    Retained intervals are contiguous credible cores of the Viterbi differences:
+    every retained bin must meet the existing posterior criterion, and each core
+    must still meet min_bins. Uncertain flanks and interior gaps are excluded.
+
+    A pair is untestable when either group has no UMIs (e.g. depth-matched pooling of
+    groups with no depth overlap gives both zero weight) or its log ratios are not
+    finite; it gets no segments, distance inf and testable False, so callers treat it
+    as showing no difference (merged last, split rejected) instead of reading NaN.
     """
     Ya, Yb = np.atleast_2d(Ya).astype(np.float64), np.atleast_2d(Yb).astype(np.float64)
     La, Lb = np.atleast_1d(La).astype(np.float64), np.atleast_1d(Lb).astype(np.float64)
     J = Ya.shape[1]
     idx = np.arange(J) if mask is None else np.flatnonzero(mask)
     sub_reset = _subset_reset(reset, idx)
-    d = np.log((Ya[:, idx] + 0.5) / La[:, None]) - np.log((Yb[:, idx] + 0.5) / Lb[:, None])
+    Qa, Qb = (None, None) if count_variance is None else count_variance
+    ca, cb = (None, None) if weight_scale is None else weight_scale
+    ra, va = pooled_lograte(Ya, La, Qa, ca)
+    rb, vb = pooled_lograte(Yb, Lb, Qb, cb)
+    d = (ra - rb)[:, idx]
     if shift is not None:
         d = d - np.atleast_2d(shift)[:, idx]
-    v = 1.0 / (Ya[:, idx] + 0.5) + 1.0 / (Yb[:, idx] + 0.5)
+    testable = (La > 0) & (Lb > 0) & np.isfinite(d).all(axis=1)
+    d[~testable] = 0.0                                   # placeholder so the batched HMM stays finite
+    v = (va + vb)[:, idx]
     tau = np.empty(len(d))
     for p in range(len(d)):
         d[p] -= weighted_median(d[p], 1.0 / (0.04 + v[p]))
@@ -189,9 +273,11 @@ def difference_segments(Ya, La, Yb, Lb, reset, beta, params: ProfileParams, mask
     sign = np.sign(DIFF_LEVELS).astype(int)              # -1, 0, +1 per state
     results = []
     for p in range(len(d)):
+        if not testable[p]:
+            results.append(dict(segments=[], distance=float('inf'), tau=float('nan'), testable=False))
+            continue
         segs = []
-        signed = sign[path[p]]
-        for a, b, s in runs(signed + 1, sub_reset):
+        for a, b, s in credible_difference_runs(path[p], post[p], sub_reset, params):
             n = b - a + 1
             s -= 1
             support = float(post[p, a:b + 1][:, sign == s].sum(axis=1).mean())
@@ -201,9 +287,11 @@ def difference_segments(Ya, La, Yb, Lb, reset, beta, params: ProfileParams, mask
             mean = float(np.sum(w * d[p, a:b + 1]) / w.sum())
             segs.append(dict(first_bin=int(idx[a]), last_bin=int(idx[b]), n_test_bins=n,
                              direction='higher' if s > 0 else 'lower', mean_diff=mean,
-                             z=mean * np.sqrt(w.sum()), posterior=support))
+                             z=mean * np.sqrt(w.sum()), posterior=support,
+                             min_bin_posterior=float(post[p, a:b + 1, s + 1].min()),
+                             posterior_rule='every_retained_bin'))
         dist = float(np.mean(d[p] ** 2 / var[p]))
-        results.append(dict(segments=segs, distance=dist, tau=float(tau[p])))
+        results.append(dict(segments=segs, distance=dist, tau=float(tau[p]), testable=True))
     return results
 
 

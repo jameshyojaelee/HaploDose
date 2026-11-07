@@ -10,6 +10,8 @@ learned on normal cells (see `haplodose.programmes`).
 """
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -34,31 +36,105 @@ def _chunk_loglik(Y, L, x, U, rate0, delta, gamma, W, inv_phi):
 
 
 @jax.jit
-def _chunk_scores(Y, L, x, R, log_rate, gamma, W, inv_phi, prior_prec):
-    # Fisher scoring for u_c on the normalised NB objective around the responsibility-weighted clone log rate
-    # (R @ log_rate, a surrogate for the responsibility-weighted likelihood). The rate is a softmax of
-    # lr0 + u W, so d log m_j / d u_f = W_fj - sum_k s_k W_fk (loadings centred on the cell's composition s).
-    lr0 = R @ log_rate + x[:, None] * gamma[None]                         # n, J
+def _chunk_scores_fit(Y, L, x, R, log_rate, gamma, W, inv_phi, prior_prec):
+    """Fisher scoring of sum_k R_ck log NB(Y_c | clone k, u_c) plus the score prior.
+
+    Clone accumulation uses n x J temporaries, not n x K x J. Backtracking
+    compares stable NB log-likelihood ratios, so large shared count terms do not
+    determine acceptance. Iteration limits are resource safeguards; reaching one
+    never reports convergence. The step tolerance is tied to float32 precision.
+    """
+    n, J = Y.shape
+    F = W.shape[0]
     phi = 1.0 / inv_phi
+    eps = np.finfo(np.float32).eps
+    step_tol = np.sqrt(eps)
+    offset = x[:, None] * gamma[None]
 
-    def step(u, _):
-        lr = lr0 + u @ W
-        s = jnp.exp(lr - jax.scipy.special.logsumexp(lr, axis=-1, keepdims=True))
-        m = L[:, None] * s
-        a = (Y - m) / (1.0 + phi[None] * m)                               # d loglik / d log m
-        w = m / (1.0 + phi[None] * m)                                     # Fisher weight per log m
-        Wbar = s @ W.T                                                    # n, F
-        g = a @ W.T - Wbar * a.sum(axis=1, keepdims=True) - u * prior_prec[None]
-        Ww = w @ W.T                                                      # n, F
-        H = ((W[None] * w[:, None, :]) @ W.T - Wbar[:, :, None] * Ww[:, None, :] - Ww[:, :, None] * Wbar[:, None, :]
-             + Wbar[:, :, None] * Wbar[:, None, :] * w.sum(axis=1)[:, None, None] + jnp.diag(prior_prec)[None])
+    def composition(u, k):
+        lr = log_rate[k][None] + offset + u @ W
+        return jax.nn.softmax(lr, axis=-1)
+
+    def derivatives(u):
+        def add(k, accum):
+            g, H = accum
+            s = composition(u, k)
+            m = L[:, None] * s
+            a = (Y - m) / (1.0 + phi[None] * m)
+            w = m / (1.0 + phi[None] * m)
+            Wbar, Ww = s @ W.T, w @ W.T
+            grad = a @ W.T - Wbar * a.sum(axis=1, keepdims=True)
+            fisher = ((W[None] * w[:, None, :]) @ W.T
+                      - Wbar[:, :, None] * Ww[:, None, :] - Ww[:, :, None] * Wbar[:, None, :]
+                      + Wbar[:, :, None] * Wbar[:, None, :] * w.sum(axis=1)[:, None, None])
+            return g + R[:, k, None] * grad, H + R[:, k, None, None] * fisher
+        return jax.lax.fori_loop(0, log_rate.shape[0], add,
+                                (-u * prior_prec[None], jnp.broadcast_to(jnp.diag(prior_prec), (n, F, F))))
+
+    def improvement(u, du):
+        delta = du @ W
+        def add(k, accum):
+            value, magnitude = accum
+            s = composition(u, k)
+            d = delta - jnp.log1p(jnp.sum(s * jnp.expm1(delta), axis=1))[:, None]
+            m = L[:, None] * s
+            a = Y * d
+            b = (Y + inv_phi) * jnp.log1p(m / (inv_phi + m) * jnp.expm1(d))
+            return (value + R[:, k] * jnp.sum(a - b, axis=1),
+                    magnitude + R[:, k] * jnp.sum(jnp.abs(a) + jnp.abs(b), axis=1))
+        value, magnitude = jax.lax.fori_loop(0, log_rate.shape[0], add, (jnp.zeros(n), jnp.zeros(n)))
+        penalty = jnp.sum(prior_prec[None] * du * (u + 0.5 * du), axis=1)
+        # Standard gamma_N reduction bound, with elementary per-bin arithmetic.
+        gamma_n = (J + 16) * eps / jnp.maximum(1.0 - (J + 16) * eps, eps)
+        error = gamma_n * (magnitude + jnp.sum(jnp.abs(prior_prec[None] * du * (u + 0.5 * du)), axis=1))
+        return value - penalty, error
+
+    def iterate(state):
+        u, active, converged, failed, iterations, gain = state
+        g, H = derivatives(u)
         du = jnp.linalg.solve(H, g[..., None])[..., 0]
-        # Damped: no bin's log rate moves more than 0.5 per step (Newton can overshoot in sparse cells).
-        size = jnp.max(jnp.abs(du @ W), axis=1, keepdims=True)
-        return u + du * jnp.minimum(1.0, 0.5 / jnp.maximum(size, 1e-12)), None
+        finite = jnp.isfinite(du).all(axis=1)
+        # Bound the initial step for the local approximation; acceptance is still
+        # decided by the actual responsibility-weighted objective, not this cap.
+        size = jnp.max(jnp.abs(du @ W), axis=1)
+        small = size <= step_tol * (1.0 + jnp.max(jnp.abs(u @ W), axis=1))
+        converged = converged | (active & finite & small)
+        working = active & finite & ~small
+        direction = jnp.where(working[:, None], du, 0.0)
+        direction *= jnp.minimum(1.0, 0.5 / jnp.maximum(size, eps))[:, None]
 
-    u, _ = jax.lax.scan(step, jnp.zeros((Y.shape[0], W.shape[0]), Y.dtype), None, length=5)
-    return u
+        def searching(search):
+            count, scale, accepted, _, _ = search
+            return (count < np.finfo(np.float32).nmant + 2) & jnp.any(working & ~accepted)
+
+        def shrink(search):
+            count, scale, accepted, accepted_du, accepted_gain = search
+            trial = direction * scale[:, None]
+            delta_q, error = improvement(u, trial)
+            accept = working & ~accepted & jnp.isfinite(delta_q) & (delta_q >= -error)
+            accepted_du = jnp.where(accept[:, None], trial, accepted_du)
+            accepted_gain = jnp.where(accept, delta_q, accepted_gain)
+            return count + 1, jnp.where(accepted | accept, scale, 0.5 * scale), accepted | accept, accepted_du, accepted_gain
+
+        _, _, accepted, move, delta_q = jax.lax.while_loop(
+            searching, shrink, (0, jnp.ones(n), jnp.zeros(n, bool), jnp.zeros_like(u), jnp.zeros(n)))
+        failed = failed | (active & (~finite | (working & ~accepted)))
+        iterations += active.astype(jnp.int32)
+        return u + move, working & accepted, converged, failed, iterations, gain + delta_q
+
+    initial = (jnp.zeros((n, F), Y.dtype), jnp.ones(n, bool), jnp.zeros(n, bool),
+               jnp.zeros(n, bool), jnp.zeros(n, jnp.int32), jnp.zeros(n))
+    # The cap bounds compute only; the returned convergence flags are explicit.
+    state = jax.lax.while_loop(lambda s: jnp.any(s[1]) & (jnp.max(s[4]) < 100), iterate, initial)
+    u, _, converged, failed, iterations, gain = state
+    return u, converged, failed, iterations, gain
+
+
+def _chunk_scores(Y, L, x, R, log_rate, gamma, W, inv_phi, prior_prec):
+    """Array-only compatibility entry point; programme_scores exposes diagnostics."""
+    if W.shape[0] == 0:
+        return jnp.zeros((Y.shape[0], 0), Y.dtype)
+    return _chunk_scores_fit(Y, L, x, R, log_rate, gamma, W, inv_phi, prior_prec)[0]
 
 
 def _chunks(n, per_row, max_elements):
@@ -101,22 +177,55 @@ def cell_loglik(Y, L, log_rate, phi, x=None, gamma=None, U=None, W=None, max_ele
     return out
 
 
-def programme_scores(Y, L, R, log_rate, phi, W, prior_prec, x=None, gamma=None, max_elements=2 ** 24):
+def programme_scores(Y, L, R, log_rate, phi, W, prior_prec, x=None, gamma=None, max_elements=2 ** 24,
+                     return_diagnostics=False):
     """Per-cell programme scores u [n, F], shrunk towards 0 with precision prior_prec [F].
 
-    The expected composition is the responsibility-weighted clone log rate
-    (R [n, K]), so the cell's copy-number profile is not absorbed into u."""
+    Optimizes the responsibility-weighted sum of clone-specific NB log-likelihoods,
+    not the likelihood at an averaged log rate. Diagnostics describe numerical
+    convergence of this conditional working objective, not biological validity.
+    """
     n, J = Y.shape
     F = W.shape[0]
+    R = np.asarray(R)
+    if R.ndim != 2 or R.shape != (n, np.shape(log_rate)[0]):
+        raise ValueError('Programme responsibilities must have one row per cell and one column per clone')
+    if (not np.isfinite(R).all() or (R < 0).any()
+            or not np.allclose(R.sum(axis=1), 1.0, rtol=0,
+                               atol=8 * np.finfo(np.float32).eps * max(1, R.shape[1]))):
+        raise ValueError('Programme responsibilities must be finite, nonnegative and sum to one')
+    if (not np.isfinite(phi).all() or (np.asarray(phi) <= 0).any()
+            or not np.isfinite(prior_prec).all() or (np.asarray(prior_prec) <= 0).any()):
+        raise ValueError('Programme dispersions and prior precisions must be finite and positive')
+    if (not np.isfinite(L).all() or (np.asarray(L) < 0).any() or not np.isfinite(log_rate).all()
+            or not np.isfinite(W).all()):
+        raise ValueError('Programme depths, clone rates and loadings must be finite, with nonnegative depths')
+    diagnostics = dict(converged=np.ones(n, bool), failed=np.zeros(n, bool),
+                       iterations=np.zeros(n, np.int32), objective_gain=np.zeros(n, np.float64))
+    if F == 0:
+        out = np.zeros((n, 0), np.float32)
+        return (out, diagnostics) if return_diagnostics else out
     x = np.zeros(n, np.float32) if x is None else np.asarray(x, np.float32)
     gamma = jnp.asarray(np.zeros(J) if gamma is None else gamma, jnp.float32)
+    if not np.isfinite(x).all() or not np.isfinite(gamma).all():
+        raise ValueError('Programme depth offsets must be finite')
     args = (jnp.asarray(log_rate, jnp.float32), gamma, jnp.asarray(W, jnp.float32),
             jnp.asarray(1.0 / np.asarray(phi), jnp.float32), jnp.asarray(prior_prec, jnp.float32))
     out = np.empty((n, F), np.float32)
     for a, b, size in _chunks(n, max(F, R.shape[1]) * J, max_elements):
-        out[a:b] = np.asarray(_chunk_scores(_pad(Y[a:b], size), _pad(L[a:b], size, 1.0), _pad(x[a:b], size),
-                                            _pad(R[a:b], size), *args))[:b - a]
-    return out
+        if not np.isfinite(Y[a:b]).all() or (Y[a:b] < 0).any():
+            raise ValueError('Programme counts must be finite and nonnegative')
+        result = _chunk_scores_fit(_pad(Y[a:b], size), _pad(L[a:b], size, 1.0), _pad(x[a:b], size),
+                                   _pad(R[a:b], size), *args)
+        out[a:b] = np.asarray(result[0])[:b - a]
+        for key, value in zip(diagnostics, result[1:]):
+            diagnostics[key][a:b] = np.asarray(value)[:b - a]
+    if not np.isfinite(out).all():
+        raise FloatingPointError('Nonfinite programme scores')
+    if not diagnostics['converged'].all():
+        warnings.warn(f"Programme optimizer did not converge for {int((~diagnostics['converged']).sum())} cells; "
+                      'returning the last finite objective-checked scores', RuntimeWarning)
+    return (out, diagnostics) if return_diagnostics else out
 
 
 def posteriors(loglik, log_pi):

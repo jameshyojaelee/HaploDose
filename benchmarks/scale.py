@@ -30,6 +30,7 @@ def main():
     ap.add_argument('--cells', type=int, default=1_000_000)
     ap.add_argument('--specimens', type=int, default=10)
     ap.add_argument('--simulate-only', action='store_true')
+    ap.add_argument('--device', choices=['cpu', 'gpu', 'auto'], default='cpu')
     a = ap.parse_args()
     root = new_output_dir(a.out)
     rng = np.random.default_rng(20261101)
@@ -104,8 +105,12 @@ def main():
     # Separate process, so its peak memory excludes the simulation.
     subprocess.run([sys.executable, '-s', '-m', 'haplodose.cli', 'run', '--counts', str(root / 'counts.h5'),
                     '--cells', str(root / 'cells.tsv'), '--positions', str(root / 'positions.tsv'),
-                    '--out', str(root / 'haplodose')], check=True)
+                    '--out', str(root / 'haplodose'), '--device', a.device,
+                    '--counts-kind', 'raw', '--genome-build', 'hg38',
+                    '--coordinate-system', 'one-based-closed', '--gene-namespace', 'custom'], check=True)
     qc = json.loads((root / 'haplodose' / 'qc.json').read_text())
+    if a.device != 'auto' and qc['backend'] != a.device:
+        raise RuntimeError(f'Requested {a.device}, inference recorded {qc["backend"]}')
     cells = pd.read_csv(root / 'haplodose' / 'cells.tsv.gz', sep='\t', usecols=['specimen', 'truth_clone', 'clone',
                                                                                'malignant_call', 'status'])
     from sklearn.metrics import adjusted_rand_score

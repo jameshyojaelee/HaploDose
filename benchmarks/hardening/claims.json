@@ -1,0 +1,3532 @@
+{
+  "schema_version": 2,
+  "master_seed": 20261106,
+  "purpose": "Development falsification and corrected retrospective regression; not a new confirmatory claim",
+  "biological_unit": "independent donor or independently derived cell line; repeated samples and seeds are nested",
+  "frozen_artifacts_policy": "never overwrite; new source, truth, output and scorer identities",
+  "regression_only": [
+    "MIX-seq",
+    "CCLE",
+    "CPTAC",
+    "SPECTRUM",
+    "Schmid",
+    "REBC"
+  ],
+  "prospective_evaluation": "No verified sufficiently replicated unopened clone panel. Metadata eligibility precedes outcomes.",
+  "diagnostic_panel": [
+    {
+      "dataset": "Kinker",
+      "ids": [
+        "42MGBA_CENTRAL_NERVOUS_SYSTEM",
+        "2313287_STOMACH"
+      ],
+      "question": "profile information versus matched smoothing",
+      "role": "development",
+      "truth": "relative DepMap profiles; different assays/cultures, not per-cell clone labels"
+    },
+    {
+      "dataset": "U-CAN",
+      "ids": [
+        "CRC.SW.U0008.T",
+        "CRC.SW.U0001.T"
+      ],
+      "question": "bulk profile correction and reference effects",
+      "role": "development",
+      "measurement": "featureCounts exon counts"
+    },
+    {
+      "dataset": "TCGA",
+      "ids": [
+        "TCGA-05-4389-01"
+      ],
+      "question": "where segmented output loses the unsegmented contrast",
+      "role": "processing_diagnostic",
+      "measurement": "inverted batch-adjusted RSEM, NOT raw counts"
+    },
+    {
+      "dataset": "TCGA COAD/READ",
+      "ids": "matched existing raw-STAR/Xena cases, deterministic ID-based partitions",
+      "question": "measurement scale and transferable loss thresholds",
+      "role": "development"
+    },
+    {
+      "dataset": "Andor",
+      "ids": [
+        "SNU-601",
+        "MKN-45",
+        "NUGC-4"
+      ],
+      "question": "DNA-profile resolution versus RNA subdivisions",
+      "role": "development",
+      "limit": "different DNA/RNA cells; low-depth one-clone labels do not certify null specimens"
+    },
+    {
+      "dataset": "Kinker alleles",
+      "ids": [
+        "2313287_STOMACH"
+      ],
+      "question": "donor-specific allele measurement integrity",
+      "role": "development",
+      "limit": "not same-cell DNA clone validation"
+    }
+  ],
+  "claims": [
+    {
+      "output": "relative_RNA_dosage",
+      "estimand": "regional RNA composition relative to a specified reference",
+      "model": "PLN pooled / NB cell working likelihood",
+      "alternative": "reference, state, depth or batch effects",
+      "computationally_correct": "targeted_numerical_identity_and_workflow_invariants_pass; no claim of exhaustive proof",
+      "statistically_identifiable": "conditional_on_reference_and_nuisance_assumptions",
+      "biologically_validated": "not_established_for_new_version",
+      "falsifier": "equivalent observations yield different predictions, or matched smoothing removes claimed gain",
+      "identifying_assumptions": "Reference identity/composition and nuisance restrictions are independently justified; normalized abundance has no absolute scale.",
+      "distinguishing_evidence": "Independent reference constraints and replicated RNA contrast; matched preprocessing/smoothing benefit on same callable support.",
+      "evidence": [
+        "identifiability_v4/summary.json",
+        "ucan_v6/summary.json",
+        "profile_v6/summary.json",
+        "artifact_diagnostics_v8/summary.json"
+      ],
+      "decision": "retain unsegmented and segmented diagnostics with simple baselines; no general superiority or new model-component promotion"
+    },
+    {
+      "output": "candidate_DNA_alteration",
+      "estimand": "DNA dosage difference at stated resolution",
+      "model": "RNA response to relative DNA dosage",
+      "alternative": "regional transcription, purity or ploidy ambiguity",
+      "computationally_correct": "targeted_numerical_identity_and_workflow_invariants_pass; no claim of exhaustive proof",
+      "statistically_identifiable": "not_from_RNA_alone_in_general",
+      "biologically_validated": "requires_corresponding_DNA",
+      "falsifier": "adequately powered independent DNA contradicts signed regional prediction",
+      "identifying_assumptions": "RNA response to DNA dosage is sufficiently specific at declared callable resolution; corresponding DNA baseline is identified.",
+      "distinguishing_evidence": "Independently processed corresponding DNA with documented purity/ploidy assumptions, coverage and breakpoint uncertainty.",
+      "evidence": [
+        "truth_v2",
+        "ucan_v6/summary.json",
+        "andor_rna_v7/summary.json"
+      ],
+      "decision": "candidate-only; match DNA resolution and withhold unsupported absolute-CN/purity/WGD claims"
+    },
+    {
+      "output": "allelic_imbalance",
+      "estimand": "haplotype fraction contrast",
+      "model": "phase-aware count likelihood",
+      "alternative": "ASE, imprinting, mapping bias or donor mismatch",
+      "computationally_correct": "targeted_numerical_identity_and_workflow_invariants_pass; no claim of exhaustive proof",
+      "statistically_identifiable": "conditional_on_phase_bias_and_dispersion",
+      "biologically_validated": "not_equivalent_to_DNA_LOH",
+      "falsifier": "allele orientation/count provenance fails or bias controls reproduce contrast",
+      "identifying_assumptions": "Donor identity, genome assembly, phase, mapping bias and RNA allele dispersion are adequate.",
+      "distinguishing_evidence": "Concordant independent DNA genotypes and reserved SNP evidence; bounded BAM/panel inspection resolves source discrepancies only.",
+      "evidence": [
+        "allele_trace_v4/summary.json",
+        "allele_assembly_v2/summary.json",
+        "allele_template_v1/commands.json"
+      ],
+      "decision": "exact traced transformation reconciled; false assembly header explained; donor identity/phase truth unverified"
+    },
+    {
+      "output": "candidate_CNA_groups",
+      "estimand": "groups with distinguishable CNA profiles at assay resolution",
+      "model": "adaptive expression/allele mixture",
+      "alternative": "state, batch and selection-induced groups",
+      "computationally_correct": "Targeted invariants and optimizer retry pass. Refinement and merging now disclose uncertified stopping and assigned-pool uncertainty. Three full recovery failures and cross-hardware event-proposal sensitivity remain unresolved.",
+      "statistically_identifiable": "RNA_groups_do_not_uniquely_identify_DNA_clones",
+      "biologically_validated": "not_established; broad_model_error_control_falsified_by_correlated_state_null",
+      "falsifier": "whole-workflow error exceeds declared bound or true contrasts are suppressed",
+      "identifying_assumptions": "CNA differences, rather than correlated cell state/reference mismatch, explain adaptive RNA groups.",
+      "distinguishing_evidence": "Independent single-CNA biological controls plus same-cell DNA/RNA membership and matched-nuisance power.",
+      "evidence": [
+        "clones_matched_nb_v4/summary.json",
+        "clones_correlated_state_v4/summary.json",
+        "thin_attribution_v1",
+        "clone_summary_v8/summary.json",
+        "andor_rna_v7/summary.json",
+        "dev/recovery_next_20261107/evidence_v1/report.json"
+      ],
+      "decision": "exploratory_only; global rank prototype not promoted; whole-specimen 5 percent guarantee and reliable CNA membership remain unsupported",
+      "followup_evidence": [
+        "dev/recovery_20261107/recovery_baseline_v1/summary.tsv",
+        "dev/recovery_20261107/stage2_global_rank_v3/summary.json",
+        "dev/membership_20261107/final_panel_v1/summary.tsv",
+        "dev/membership_20261107/evidence_v2/report.json",
+        "dev/membership_20261107/mode_evidence_v1/report.json"
+      ]
+    },
+    {
+      "output": "spatial_assignments",
+      "estimand": "spatial distribution of candidate profiles",
+      "model": "directed neighbour smoothing heuristic",
+      "alternative": "state gradients and normal admixture",
+      "computationally_correct": "targeted_numerical_identity_and_workflow_invariants_pass; no claim of exhaustive proof",
+      "statistically_identifiable": "mixed_spots_not_single_clone_membership",
+      "biologically_validated": "requires_matched_region_evidence",
+      "falsifier": "non-genetic spatial gradients yield unsupported genotype structure",
+      "identifying_assumptions": "Spatial structure carries genotype information beyond gradients, mixing and RNA-defined group uncertainty.",
+      "distinguishing_evidence": "Matched-region DNA plus boundary/mixing challenges; bulk DNA cannot establish spot membership.",
+      "evidence": [
+        "validation_22814288/pytest.txt"
+      ],
+      "decision": "no richer model promoted; exploratory smoothing only"
+    },
+    {
+      "output": "uncertainty",
+      "estimand": "population mean systematic RNA log effect for optional known-nuisance helper; routine approximate SE has no validated parameter-interval target",
+      "model": "explicit Poisson plus zero-mean Gaussian covariance for optional intervals; routine independent-bin scale approximation remains unvalidated",
+      "alternative": "unmodeled nuisance, correlation and selection",
+      "computationally_correct": "targeted_numerical_identity_and_workflow_invariants_pass; no claim of exhaustive proof",
+      "statistically_identifiable": "optional systematic effect conditional on independently fixed E and known Sigma; observation statistic is not itself an unknown estimand",
+      "biologically_validated": "not_established; legacy coverage falsified in 5 of 6 new simulations; optional known-covariance construction passes model-conditional study with wide intervals and limited power",
+      "falsifier": "declared coverage or error bound fails independent assessment",
+      "identifying_assumptions": "The stated estimand, fitted nuisance, genomic dependence and selection are represented in the uncertainty model.",
+      "distinguishing_evidence": "Prespecified repeated-workflow coverage/error bounds, followed by biological calibration controls.",
+      "evidence": [
+        "uncertainty_v4/summary.json",
+        "uncertainty_v4_logtails/primary_logtails.tsv"
+      ],
+      "decision": "optional model-conditional simultaneous intervals only; routine SEs remain scale diagnostics; no biological confidence or detection-limit claim",
+      "followup_evidence": [
+        "dev/recovery_20261107/uncertainty_simultaneous_v1/summary.json",
+        "dev/recovery_20261107/evidence_check_v1/report.json"
+      ]
+    }
+  ],
+  "clone_gate": {
+    "target": 0.05,
+    "confidence": 0.95,
+    "bound": "one-sided exact binomial; simultaneous bounds for prespecified primary strata",
+    "null": "independently supported single-CNA population at documented DNA detection limit",
+    "power": "report true-contrast recovery, membership when same-cell truth exists, and abstention; all-single output is not successful recovery",
+    "biological_n_required_if_zero_errors_single_population": 59,
+    "observed_biological_validation_n": 0,
+    "simulation_scope": "100 seeds per condition are simulation replicates; conditional binned known-reference search, not complete public raw-data workflow",
+    "simulation_bounds": "Joint one-sided95% Bonferroni family9: six null upper bounds plus three same-nuisance alternative detection lower bounds. Separate earlier6/3 family bounds preserved.",
+    "joint_results": {
+      "matched_nb": {
+        "events": 0,
+        "n": 100,
+        "upper": 0.05060426815480313
+      },
+      "correlated_state": {
+        "events": 91,
+        "n": 100,
+        "upper": 0.9673460900170242
+      },
+      "two_clones_same_state": {
+        "multigroup_events": 100,
+        "n": 100,
+        "lower": 0.9493957318451969,
+        "median_CNA_label_ARI": 0.07590855829120996
+      }
+    },
+    "decision": "failed; state-calibrated global gate upper bound 8.96 percent exceeds 5 percent; reliable membership unsupported; no default change",
+    "followup_simulation": "200 evaluations per condition with 199 calibration specimens per null; all simulations, no biological replication",
+    "followup_joint_results": [
+      {
+        "condition": "matched_nb",
+        "method": "raw",
+        "events": 0,
+        "n": 200,
+        "rate": 0.0,
+        "endpoint": "raw_multigroup_event",
+        "joint_family9_direction": "upper",
+        "joint_family9_bound": 0.025630597850488292,
+        "mean_raw_candidate_coverage_with_abstention": null,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.51,
+        "raw_CNA_label_ARI_median": 1.0,
+        "raw_candidate_count_distribution": {
+          "1": 200
+        }
+      },
+      {
+        "condition": "matched_nb",
+        "method": "NB_calibrated_gate",
+        "events": 0,
+        "n": 200,
+        "rate": 0.0,
+        "endpoint": "accepted_RNA_distinction_event",
+        "joint_family9_direction": "upper",
+        "joint_family9_bound": 0.025630597850488292,
+        "mean_raw_candidate_coverage_with_abstention": 0.0,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.51,
+        "raw_CNA_label_ARI_median": 1.0,
+        "raw_candidate_count_distribution": {
+          "1": 200
+        }
+      },
+      {
+        "condition": "matched_nb",
+        "method": "state_calibrated_gate",
+        "events": 0,
+        "n": 200,
+        "rate": 0.0,
+        "endpoint": "accepted_RNA_distinction_event",
+        "joint_family9_direction": "upper",
+        "joint_family9_bound": 0.025630597850488292,
+        "mean_raw_candidate_coverage_with_abstention": 0.0,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.51,
+        "raw_CNA_label_ARI_median": 1.0,
+        "raw_candidate_count_distribution": {
+          "1": 200
+        }
+      },
+      {
+        "condition": "correlated_state",
+        "method": "raw",
+        "events": 184,
+        "n": 200,
+        "rate": 0.92,
+        "endpoint": "raw_multigroup_event",
+        "joint_family9_direction": "upper",
+        "joint_family9_bound": 0.9609976622512658,
+        "mean_raw_candidate_coverage_with_abstention": null,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.0,
+        "raw_CNA_label_ARI_median": 0.0,
+        "raw_candidate_count_distribution": {
+          "3": 172,
+          "2": 3,
+          "1": 16,
+          "4": 9
+        }
+      },
+      {
+        "condition": "correlated_state",
+        "method": "NB_calibrated_gate",
+        "events": 184,
+        "n": 200,
+        "rate": 0.92,
+        "endpoint": "accepted_RNA_distinction_event",
+        "joint_family9_direction": "upper",
+        "joint_family9_bound": 0.9609976622512658,
+        "mean_raw_candidate_coverage_with_abstention": 0.9181833333333332,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.0,
+        "raw_CNA_label_ARI_median": 0.0,
+        "raw_candidate_count_distribution": {
+          "3": 172,
+          "2": 3,
+          "1": 16,
+          "4": 9
+        }
+      },
+      {
+        "condition": "correlated_state",
+        "method": "state_calibrated_gate",
+        "events": 8,
+        "n": 200,
+        "rate": 0.04,
+        "endpoint": "accepted_RNA_distinction_event",
+        "joint_family9_direction": "upper",
+        "joint_family9_bound": 0.08963855138050242,
+        "mean_raw_candidate_coverage_with_abstention": 0.03994166666666667,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.0,
+        "raw_CNA_label_ARI_median": 0.0,
+        "raw_candidate_count_distribution": {
+          "3": 172,
+          "2": 3,
+          "1": 16,
+          "4": 9
+        }
+      },
+      {
+        "condition": "two_clones",
+        "method": "raw",
+        "events": 200,
+        "n": 200,
+        "rate": 1.0,
+        "endpoint": "raw_multigroup_event",
+        "joint_family9_direction": "lower",
+        "joint_family9_bound": 0.9743694021495117,
+        "mean_raw_candidate_coverage_with_abstention": null,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.07720123568012639,
+        "raw_CNA_label_ARI_median": 0.07642224410646062,
+        "raw_candidate_count_distribution": {
+          "3": 130,
+          "4": 68,
+          "5": 2
+        }
+      },
+      {
+        "condition": "two_clones",
+        "method": "NB_calibrated_gate",
+        "events": 200,
+        "n": 200,
+        "rate": 1.0,
+        "endpoint": "accepted_RNA_distinction_event",
+        "joint_family9_direction": "lower",
+        "joint_family9_bound": 0.9743694021495117,
+        "mean_raw_candidate_coverage_with_abstention": 0.996975,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.07720123568012639,
+        "raw_CNA_label_ARI_median": 0.07642224410646062,
+        "raw_candidate_count_distribution": {
+          "3": 130,
+          "4": 68,
+          "5": 2
+        }
+      },
+      {
+        "condition": "two_clones",
+        "method": "state_calibrated_gate",
+        "events": 65,
+        "n": 200,
+        "rate": 0.325,
+        "endpoint": "accepted_RNA_distinction_event",
+        "joint_family9_direction": "lower",
+        "joint_family9_bound": 0.24335168576383168,
+        "mean_raw_candidate_coverage_with_abstention": 0.324325,
+        "subdivision_membership_status": "unsupported",
+        "subdivision_membership_abstention_fraction": 1.0,
+        "raw_CNA_label_ARI_mean": 0.07720123568012639,
+        "raw_CNA_label_ARI_median": 0.07642224410646062,
+        "raw_candidate_count_distribution": {
+          "3": 130,
+          "4": 68,
+          "5": 2
+        }
+      }
+    ]
+  },
+  "implementation_evidence_root": "dev/hardening_20261106_2119",
+  "implementation_status": "exploratory_candidate_membership_limitations_explicit_three_recovery_failures_remain",
+  "build_validation": {
+    "job": "22850847",
+    "python_passed": 315,
+    "python_skipped": 1,
+    "python_failed": 0,
+    "rust_passed": 4,
+    "wheel_sha256": "be7d668a0f484ade3f5e4f4e93672ff2878c14f1b7554c3bf0bf86185df71c04",
+    "source": "dev/membership_20261107/candidate_status_v1",
+    "report": "dev/membership_20261107/validation_22850847/pytest.txt",
+    "additional_targeted_checks": {
+      "job": "22851096",
+      "passed": 3,
+      "overlap_with_full_suite": 2,
+      "report": "dev/membership_20261107/paired_tests_v1/pytest.txt"
+    }
+  },
+  "decisions": [
+    {
+      "priority": 0,
+      "assumption": "measurement identity and computation",
+      "decision": "retain mandatory corrections and versioned input/schema migration",
+      "remaining": "historical original aligner versions/annotations are incompletely recorded"
+    },
+    {
+      "priority": 1,
+      "assumption": "profile information beyond reference and smoothing",
+      "decision": "mixed development evidence; keep simple controls and both signal stages; no universal benefit claim",
+      "remaining": "independent learned segmentation control and prospective eligible specimens"
+    },
+    {
+      "priority": 1,
+      "assumption": "CNA groups distinguished from expression state",
+      "decision": "error/power correction fails applicability; exploratory groups only",
+      "remaining": "full raw-data adaptive calibration and suitable independent biological null/power panel"
+    },
+    {
+      "priority": 2,
+      "assumption": "uncertainty predicts errors",
+      "decision": "optional known-nuisance simultaneous intervals pass conditional experiment but are wide; routine SE confidence claim withheld",
+      "remaining": "independent expectation/covariance measurements and their uncertainty; adequate biological calibration and detection"
+    },
+    {
+      "priority": 3,
+      "assumption": "richer spatial/mixture model is necessary",
+      "decision": "not promoted; no decisive evidence establishes benefit over simplification",
+      "remaining": "targeted independent genotype evidence if revisited"
+    }
+  ],
+  "history": [
+    {
+      "evidence_root": "dev/hardening_20261106_2119",
+      "full_previous_ledger": "dev/recovery_20261107/baseline/benchmarks/hardening/claims.json",
+      "previous_build_validation": {
+        "job": "22814288",
+        "python_passed": 280,
+        "python_skipped": 1,
+        "python_failed": 1,
+        "failure": "test_thin_records_mode_and_recovers_clones",
+        "rust_passed": 4,
+        "wheel_sha256": "267e8e8d6b7fb62696f67d404a021f48d10344a106ab265cebb09657232a2f2d",
+        "additional_helper_tests": {
+          "job": "22814832",
+          "passed": 16,
+          "scope": "includes later canonical RNA input derivative fixtures"
+        }
+      },
+      "decision": "Historical failures, scores and scientific decisions preserved; follow-up does not rewrite them."
+    },
+    {
+      "evidence_root": "dev/recovery_20261107",
+      "full_previous_ledger": "dev/recovery_next_20261107/baseline/benchmarks/hardening/claims.json",
+      "previous_build_validation": {
+        "job": "22844951",
+        "python_passed": 310,
+        "python_skipped": 1,
+        "python_failed": 0,
+        "rust_passed": 4,
+        "wheel_sha256": "2f8259678f818d79988964d7d0758c8fc53282ae153ac38f2eb6b34a943d34fb",
+        "source": "dev/recovery_20261107/candidate_v5",
+        "report": "dev/recovery_20261107/validation_22844951/pytest.txt"
+      },
+      "decision": "Preserve previous outcomes; the follow-up fixes proposal optimization but leaves three complete recovery failures and the error/power criterion unresolved."
+    },
+    {
+      "evidence_root": "dev/recovery_next_20261107",
+      "full_previous_ledger": "dev/membership_20261107/baseline/benchmarks/hardening/claims.json",
+      "previous_build_validation": {
+        "job": "22846715",
+        "python_passed": 311,
+        "python_skipped": 1,
+        "python_failed": 0,
+        "rust_passed": 4,
+        "wheel_sha256": "370b49806d8e7dd92c97f4620be41d99d2d3182fa546f08201666cc71047f293",
+        "source": "dev/recovery_next_20261107/candidate_v1",
+        "report": "dev/recovery_next_20261107/validation_22846715/pytest.txt"
+      },
+      "decision": "Preserve all previous outcomes; membership follow-up does not promote a replacement inference rule."
+    }
+  ],
+  "followup_20261107": {
+    "evidence_root": "dev/recovery_20261107",
+    "report": "docs/RECOVERY_2026-11-07.md",
+    "primary_recovery": "original assertion unchanged and passing",
+    "secondary_recovery": {
+      "baseline_passed": 0,
+      "corrected_passed": 2,
+      "cases": 5,
+      "introduced_criterion_failures": 0,
+      "independent_biological_specimens": 0,
+      "evidence": "recovery_baseline_v1/summary.tsv",
+      "conclusion": "limited recovery; no seed tuning"
+    },
+    "global_rank": {
+      "summary": [
+        {
+          "condition": "matched_nb",
+          "method": "raw",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "endpoint": "raw_multigroup_event",
+          "joint_family9_direction": "upper",
+          "joint_family9_bound": 0.025630597850488292,
+          "mean_raw_candidate_coverage_with_abstention": null,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.51,
+          "raw_CNA_label_ARI_median": 1.0,
+          "raw_candidate_count_distribution": {
+            "1": 200
+          }
+        },
+        {
+          "condition": "matched_nb",
+          "method": "NB_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "endpoint": "accepted_RNA_distinction_event",
+          "joint_family9_direction": "upper",
+          "joint_family9_bound": 0.025630597850488292,
+          "mean_raw_candidate_coverage_with_abstention": 0.0,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.51,
+          "raw_CNA_label_ARI_median": 1.0,
+          "raw_candidate_count_distribution": {
+            "1": 200
+          }
+        },
+        {
+          "condition": "matched_nb",
+          "method": "state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "endpoint": "accepted_RNA_distinction_event",
+          "joint_family9_direction": "upper",
+          "joint_family9_bound": 0.025630597850488292,
+          "mean_raw_candidate_coverage_with_abstention": 0.0,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.51,
+          "raw_CNA_label_ARI_median": 1.0,
+          "raw_candidate_count_distribution": {
+            "1": 200
+          }
+        },
+        {
+          "condition": "correlated_state",
+          "method": "raw",
+          "events": 184,
+          "n": 200,
+          "rate": 0.92,
+          "endpoint": "raw_multigroup_event",
+          "joint_family9_direction": "upper",
+          "joint_family9_bound": 0.9609976622512658,
+          "mean_raw_candidate_coverage_with_abstention": null,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.0,
+          "raw_CNA_label_ARI_median": 0.0,
+          "raw_candidate_count_distribution": {
+            "3": 172,
+            "2": 3,
+            "1": 16,
+            "4": 9
+          }
+        },
+        {
+          "condition": "correlated_state",
+          "method": "NB_calibrated_gate",
+          "events": 184,
+          "n": 200,
+          "rate": 0.92,
+          "endpoint": "accepted_RNA_distinction_event",
+          "joint_family9_direction": "upper",
+          "joint_family9_bound": 0.9609976622512658,
+          "mean_raw_candidate_coverage_with_abstention": 0.9181833333333332,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.0,
+          "raw_CNA_label_ARI_median": 0.0,
+          "raw_candidate_count_distribution": {
+            "3": 172,
+            "2": 3,
+            "1": 16,
+            "4": 9
+          }
+        },
+        {
+          "condition": "correlated_state",
+          "method": "state_calibrated_gate",
+          "events": 8,
+          "n": 200,
+          "rate": 0.04,
+          "endpoint": "accepted_RNA_distinction_event",
+          "joint_family9_direction": "upper",
+          "joint_family9_bound": 0.08963855138050242,
+          "mean_raw_candidate_coverage_with_abstention": 0.03994166666666667,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.0,
+          "raw_CNA_label_ARI_median": 0.0,
+          "raw_candidate_count_distribution": {
+            "3": 172,
+            "2": 3,
+            "1": 16,
+            "4": 9
+          }
+        },
+        {
+          "condition": "two_clones",
+          "method": "raw",
+          "events": 200,
+          "n": 200,
+          "rate": 1.0,
+          "endpoint": "raw_multigroup_event",
+          "joint_family9_direction": "lower",
+          "joint_family9_bound": 0.9743694021495117,
+          "mean_raw_candidate_coverage_with_abstention": null,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.07720123568012639,
+          "raw_CNA_label_ARI_median": 0.07642224410646062,
+          "raw_candidate_count_distribution": {
+            "3": 130,
+            "4": 68,
+            "5": 2
+          }
+        },
+        {
+          "condition": "two_clones",
+          "method": "NB_calibrated_gate",
+          "events": 200,
+          "n": 200,
+          "rate": 1.0,
+          "endpoint": "accepted_RNA_distinction_event",
+          "joint_family9_direction": "lower",
+          "joint_family9_bound": 0.9743694021495117,
+          "mean_raw_candidate_coverage_with_abstention": 0.996975,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.07720123568012639,
+          "raw_CNA_label_ARI_median": 0.07642224410646062,
+          "raw_candidate_count_distribution": {
+            "3": 130,
+            "4": 68,
+            "5": 2
+          }
+        },
+        {
+          "condition": "two_clones",
+          "method": "state_calibrated_gate",
+          "events": 65,
+          "n": 200,
+          "rate": 0.325,
+          "endpoint": "accepted_RNA_distinction_event",
+          "joint_family9_direction": "lower",
+          "joint_family9_bound": 0.24335168576383168,
+          "mean_raw_candidate_coverage_with_abstention": 0.324325,
+          "subdivision_membership_status": "unsupported",
+          "subdivision_membership_abstention_fraction": 1.0,
+          "raw_CNA_label_ARI_mean": 0.07720123568012639,
+          "raw_CNA_label_ARI_median": 0.07642224410646062,
+          "raw_candidate_count_distribution": {
+            "3": 130,
+            "4": 68,
+            "5": 2
+          }
+        }
+      ],
+      "experiment_job": "22843218",
+      "scope": "fixed known-reference binned search; original eligible tumour-group endpoint excludes reference-like group",
+      "decision": "not promoted: correlated-state upper bound 0.08964 exceeds 0.05, detection 0.325 and raw membership ARI median 0.07642",
+      "biological_validation": false,
+      "full_raw_workflow_validation": false
+    },
+    "uncertainty": {
+      "experiment_job": "22843743",
+      "execution_source": "uncertainty_source_v1",
+      "execution_candidate": "candidate_v4; candidate_v5 only adds required raw-count declaration/provenance",
+      "primary": [
+        {
+          "condition": "matched_homogeneous",
+          "interval": "prespecified",
+          "coverage": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.9963179161033608,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.4508281142453819,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": 5.755396159656812e-13,
+          "log_p_holm": 0.0,
+          "p_undercoverage": 1.0000000000005755,
+          "p_holm": 1.0,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.994534352377956,
+            "cp_high": 1.0,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "matched_homogeneous",
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "coverage": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.9963179161033608,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.294453189266927,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": 5.755396159656812e-13,
+          "log_p_holm": 0.0,
+          "p_undercoverage": 1.0000000000005755,
+          "p_holm": 1.0,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.994534352377956,
+            "cp_high": 1.0,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "interval": "prespecified",
+          "coverage": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.9963179161033608,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.8582688279778079,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": 5.755396159656812e-13,
+          "log_p_holm": 0.0,
+          "p_undercoverage": 1.0000000000005755,
+          "p_holm": 1.0,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.994534352377956,
+            "cp_high": 1.0,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "coverage": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.9963179161033608,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.4776609930158995,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": 5.755396159656812e-13,
+          "log_p_holm": 0.0,
+          "p_undercoverage": 1.0000000000005755,
+          "p_holm": 1.0,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.994534352377956,
+            "cp_high": 1.0,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "interval": "prespecified",
+          "coverage": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.9963179161033608,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 1.4412430935446827,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": 5.755396159656812e-13,
+          "log_p_holm": 0.0,
+          "p_undercoverage": 1.0000000000005755,
+          "p_holm": 1.0,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.994534352377956,
+            "cp_high": 1.0,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "coverage": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.9963179161033608,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 1.1179719222221234,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": 5.755396159656812e-13,
+          "log_p_holm": 0.0,
+          "p_undercoverage": 1.0000000000005755,
+          "p_holm": 1.0,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 1000,
+            "n": 1000,
+            "fraction": 1.0,
+            "cp_low": 0.994534352377956,
+            "cp_high": 1.0,
+            "confidence": 0.9916666666666667
+          }
+        }
+      ],
+      "legacy_replication": [
+        {
+          "condition": "matched_homogeneous",
+          "interval": "prespecified",
+          "coverage": {
+            "successes": 934,
+            "n": 1000,
+            "fraction": 0.934,
+            "cp_low": 0.9167939495385973,
+            "cp_high": 0.9485914339810816,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 66,
+            "n": 1000,
+            "fraction": 0.066,
+            "cp_low": 0.05140856601891849,
+            "cp_high": 0.08320605046140275,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.13405245353726794,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": -4.204355460413415,
+          "log_p_holm": -3.511208279853469,
+          "p_undercoverage": 0.014930406206298924,
+          "p_holm": 0.029860812412597852,
+          "falsified_undercoverage": true,
+          "simultaneous_cp": {
+            "successes": 934,
+            "n": 1000,
+            "fraction": 0.934,
+            "cp_low": 0.9105438209074542,
+            "cp_high": 0.9530100738480827,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "matched_homogeneous",
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "coverage": {
+            "successes": 818,
+            "n": 1000,
+            "fraction": 0.818,
+            "cp_low": 0.7926611505098344,
+            "cp_high": 0.8414503466885652,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 182,
+            "n": 1000,
+            "fraction": 0.182,
+            "cp_low": 0.1585496533114348,
+            "cp_high": 0.20733884949016557,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.05995509195148197,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": -115.92189393871955,
+          "log_p_holm": -114.53559957759965,
+          "p_undercoverage": 4.5264854701548736e-51,
+          "p_holm": 1.810594188061956e-50,
+          "falsified_undercoverage": true,
+          "simultaneous_cp": {
+            "successes": 818,
+            "n": 1000,
+            "fraction": 0.818,
+            "cp_low": 0.7837427347731247,
+            "cp_high": 0.8490345451203993,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "interval": "prespecified",
+          "coverage": {
+            "successes": 985,
+            "n": 1000,
+            "fraction": 0.985,
+            "cp_low": 0.9753802999029655,
+            "cp_high": 0.9915809502499656,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 15,
+            "n": 1000,
+            "fraction": 0.015,
+            "cp_low": 0.008419049750034376,
+            "cp_high": 0.024619700097034465,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.3613914527374913,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": -9.399041545066211e-10,
+          "log_p_holm": -9.399041545066211e-10,
+          "p_undercoverage": 0.9999999990600958,
+          "p_holm": 0.9999999990600958,
+          "falsified_undercoverage": false,
+          "simultaneous_cp": {
+            "successes": 985,
+            "n": 1000,
+            "fraction": 0.985,
+            "cp_low": 0.9716657310162461,
+            "cp_high": 0.9932227782964596,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "coverage": {
+            "successes": 913,
+            "n": 1000,
+            "fraction": 0.913,
+            "cp_low": 0.8937921420432918,
+            "cp_high": 0.9297315139286008,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 87,
+            "n": 1000,
+            "fraction": 0.087,
+            "cp_low": 0.07026848607139924,
+            "cp_high": 0.10620785795670856,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.16160402304028965,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": -14.251944931715915,
+          "log_p_holm": -13.153332643047806,
+          "p_undercoverage": 6.46336913161212e-07,
+          "p_holm": 1.9390107394836347e-06,
+          "falsified_undercoverage": true,
+          "simultaneous_cp": {
+            "successes": 913,
+            "n": 1000,
+            "fraction": 0.913,
+            "cp_low": 0.8868778530714618,
+            "cp_high": 0.9349061617299333,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "interval": "prespecified",
+          "coverage": {
+            "successes": 703,
+            "n": 1000,
+            "fraction": 0.703,
+            "cp_low": 0.6736110731677268,
+            "cp_high": 0.7311883166205206,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 297,
+            "n": 1000,
+            "fraction": 0.297,
+            "cp_low": 0.2688116833794794,
+            "cp_high": 0.3263889268322731,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.3041695887961587,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": -320.94817596771327,
+          "log_p_holm": -319.3387380552792,
+          "p_undercoverage": 4.11129083696949e-140,
+          "p_holm": 2.0556454184847213e-139,
+          "falsified_undercoverage": true,
+          "simultaneous_cp": {
+            "successes": 703,
+            "n": 1000,
+            "fraction": 0.703,
+            "cp_low": 0.6634235667363125,
+            "cp_high": 0.7405255990681425,
+            "confidence": 0.9916666666666667
+          }
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "coverage": {
+            "successes": 54,
+            "n": 1000,
+            "fraction": 0.054,
+            "cp_low": 0.04082335112608518,
+            "cp_high": 0.06987400557738702,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 946,
+            "n": 1000,
+            "fraction": 0.946,
+            "cp_low": 0.930125994422613,
+            "cp_high": 0.9591766488739144,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 1000,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.003682083896639526,
+            "confidence": 0.95
+          },
+          "median_width": 0.17389115420188417,
+          "finite_width_n": 1000,
+          "log_p_undercoverage": -2629.4881151825502,
+          "log_p_holm": -2627.696355713322,
+          "p_undercoverage": 0.0,
+          "p_holm": 0.0,
+          "falsified_undercoverage": true,
+          "simultaneous_cp": {
+            "successes": 54,
+            "n": 1000,
+            "fraction": 0.054,
+            "cp_low": 0.036901757340579884,
+            "cp_high": 0.0756805002561542,
+            "confidence": 0.9916666666666667
+          }
+        }
+      ],
+      "power": [
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.0,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 189,
+            "n": 200,
+            "fraction": 0.945,
+            "cp_low": 0.9037223555661189,
+            "cp_high": 0.9722277454478245,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 11,
+            "n": 200,
+            "fraction": 0.055,
+            "cp_low": 0.02777225455217507,
+            "cp_high": 0.09627764443388101,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.13249389769198644,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.0,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.4509721268638605,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.0,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 160,
+            "n": 200,
+            "fraction": 0.8,
+            "cp_low": 0.7377736354103999,
+            "cp_high": 0.8531055117842555,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 40,
+            "n": 200,
+            "fraction": 0.2,
+            "cp_low": 0.14689448821574452,
+            "cp_high": 0.2622263645896002,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.059152824580735966,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.0,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.2944279348423574,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 193,
+            "n": 200,
+            "fraction": 0.965,
+            "cp_low": 0.9292190016490455,
+            "cp_high": 0.985814474101614,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 188,
+            "n": 200,
+            "fraction": 0.94,
+            "cp_low": 0.8975381686916685,
+            "cp_high": 0.9686160461065179,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.13232353151233925,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.44128736217682674,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 163,
+            "n": 200,
+            "fraction": 0.815,
+            "cp_low": 0.7541365375513216,
+            "cp_high": 0.866271339819862,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 94,
+            "n": 200,
+            "fraction": 0.47,
+            "cp_low": 0.39923294119711367,
+            "cp_high": 0.5416694995885252,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.06042639637154556,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.2916753268207388,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 193,
+            "n": 200,
+            "fraction": 0.965,
+            "cp_low": 0.9292190016490455,
+            "cp_high": 0.985814474101614,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.1327759998724085,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 159,
+            "n": 200,
+            "fraction": 0.795,
+            "cp_low": 0.7323460792147148,
+            "cp_high": 0.8486894280044814,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.4320008938246095,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 189,
+            "n": 200,
+            "fraction": 0.945,
+            "cp_low": 0.9037223555661189,
+            "cp_high": 0.9722277454478245,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 192,
+            "n": 200,
+            "fraction": 0.96,
+            "cp_low": 0.922708031773984,
+            "cp_high": 0.982575191005179,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.12972932169911106,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 157,
+            "n": 200,
+            "fraction": 0.785,
+            "cp_low": 0.7215289561159441,
+            "cp_high": 0.8398183046676637,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.43046870423611044,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 194,
+            "n": 200,
+            "fraction": 0.97,
+            "cp_low": 0.9358493732949736,
+            "cp_high": 0.9889125443277963,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.13282936176915994,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.4148843297221606,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 194,
+            "n": 200,
+            "fraction": 0.97,
+            "cp_low": 0.9358493732949736,
+            "cp_high": 0.9889125443277963,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.13256908497793746,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_homogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.4148034470642776,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.0,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 196,
+            "n": 200,
+            "fraction": 0.98,
+            "cp_low": 0.9495863909101037,
+            "cp_high": 0.9945244341204436,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 4,
+            "n": 200,
+            "fraction": 0.02,
+            "cp_low": 0.005475565879556446,
+            "cp_high": 0.050413609089896255,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3612837438307826,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.0,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.857725827716538,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.0,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 177,
+            "n": 200,
+            "fraction": 0.885,
+            "cp_low": 0.8324530555177448,
+            "cp_high": 0.9256866263077211,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 23,
+            "n": 200,
+            "fraction": 0.115,
+            "cp_low": 0.07431337369227888,
+            "cp_high": 0.16754694448225504,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.16154020418369697,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.0,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.473866965141712,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 197,
+            "n": 200,
+            "fraction": 0.985,
+            "cp_low": 0.9567917180822902,
+            "cp_high": 0.9968958923784449,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 47,
+            "n": 200,
+            "fraction": 0.235,
+            "cp_low": 0.17807073460068393,
+            "cp_high": 0.2999618726472822,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3611697669527849,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.8481662030215681,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 176,
+            "n": 200,
+            "fraction": 0.88,
+            "cp_low": 0.8267276488357894,
+            "cp_high": 0.9215797520033524,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 37,
+            "n": 200,
+            "fraction": 0.185,
+            "cp_low": 0.13372866018013796,
+            "cp_high": 0.24586346244867838,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.16164254003229384,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.47298541095461877,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 197,
+            "n": 200,
+            "fraction": 0.985,
+            "cp_low": 0.9567917180822902,
+            "cp_high": 0.9968958923784449,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 168,
+            "n": 200,
+            "fraction": 0.84,
+            "cp_low": 0.7817009846486591,
+            "cp_high": 0.8879125023541984,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.36181207366173446,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 3,
+            "n": 200,
+            "fraction": 0.015,
+            "cp_low": 0.003104107621555085,
+            "cp_high": 0.043208281917709784,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.8388675642971515,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 180,
+            "n": 200,
+            "fraction": 0.9,
+            "cp_low": 0.8497872121322442,
+            "cp_high": 0.9378406337459338,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 60,
+            "n": 200,
+            "fraction": 0.3,
+            "cp_low": 0.23738964407544677,
+            "cp_high": 0.36864987545899885,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.1621791716482825,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.47210416242207065,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 197,
+            "n": 200,
+            "fraction": 0.985,
+            "cp_low": 0.9567917180822902,
+            "cp_high": 0.9968958923784449,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3609937008017517,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 173,
+            "n": 200,
+            "fraction": 0.865,
+            "cp_low": 0.8096908273166016,
+            "cp_high": 0.9091128982451311,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.8219107859389547,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 191,
+            "n": 200,
+            "fraction": 0.955,
+            "cp_low": 0.916297311924146,
+            "cp_high": 0.9792195777729956,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 195,
+            "n": 200,
+            "fraction": 0.975,
+            "cp_low": 0.9426256488727329,
+            "cp_high": 0.9918338338092901,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3537582084355486,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "matched_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 158,
+            "n": 200,
+            "fraction": 0.79,
+            "cp_low": 0.7269312953862012,
+            "cp_high": 0.8442602432758821,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.8173213070892654,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.0,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 142,
+            "n": 200,
+            "fraction": 0.71,
+            "cp_low": 0.6418125478377089,
+            "cp_high": 0.771843010636583,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 58,
+            "n": 200,
+            "fraction": 0.29,
+            "cp_low": 0.228156989363417,
+            "cp_high": 0.35818745216229114,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3046402648654446,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.0,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.4408493390327397,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.0,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 15,
+            "n": 200,
+            "fraction": 0.075,
+            "cp_low": 0.04258280373703671,
+            "cp_high": 0.12068422539966135,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 185,
+            "n": 200,
+            "fraction": 0.925,
+            "cp_low": 0.8793157746003387,
+            "cp_high": 0.9574171962629633,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.196598266839217,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.0,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.3081208128233297,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 142,
+            "n": 200,
+            "fraction": 0.71,
+            "cp_low": 0.6418125478377089,
+            "cp_high": 0.771843010636583,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 94,
+            "n": 200,
+            "fraction": 0.47,
+            "cp_low": 0.39923294119711367,
+            "cp_high": 0.5416694995885252,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3048524671241083,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.431522807296453,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 19,
+            "n": 200,
+            "fraction": 0.095,
+            "cp_low": 0.058169609725119184,
+            "cp_high": 0.14437663997685266,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 187,
+            "n": 200,
+            "fraction": 0.935,
+            "cp_low": 0.8914127634961821,
+            "cp_high": 0.964939291343018,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.21812798922517496,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.12163953243244931,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.431810032732187,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 142,
+            "n": 200,
+            "fraction": 0.71,
+            "cp_low": 0.6418125478377089,
+            "cp_high": 0.771843010636583,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 148,
+            "n": 200,
+            "fraction": 0.74,
+            "cp_low": 0.6734222463428602,
+            "cp_high": 0.7993151451236602,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3048001334585635,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 1,
+            "n": 200,
+            "fraction": 0.005,
+            "cp_low": 0.00012658102800940386,
+            "cp_high": 0.027541898457558386,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.4222688190387207,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 39,
+            "n": 200,
+            "fraction": 0.195,
+            "cp_low": 0.14249187477906752,
+            "cp_high": 0.2567856875265595,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 191,
+            "n": 200,
+            "fraction": 0.955,
+            "cp_low": 0.916297311924146,
+            "cp_high": 0.9792195777729956,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.26224665713745027,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.24327906486489861,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.4420595260857516,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "prespecified",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 142,
+            "n": 200,
+            "fraction": 0.71,
+            "cp_low": 0.6418125478377089,
+            "cp_high": 0.771843010636583,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 199,
+            "n": 200,
+            "fraction": 0.995,
+            "cp_low": 0.9724581015424416,
+            "cp_high": 0.9998734189719902,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3045624380985854,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "prespecified",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 14,
+            "n": 200,
+            "fraction": 0.07,
+            "cp_low": 0.03879557042956297,
+            "cp_high": 0.11465973353712218,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.4053976228022904,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "legacy_reported_se",
+          "coverage": {
+            "successes": 113,
+            "n": 200,
+            "fraction": 0.565,
+            "cp_low": 0.4932612078124723,
+            "cp_high": 0.6347829308303482,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 0.3001286864941991,
+          "finite_width_n": 200
+        },
+        {
+          "condition": "correlated_heterogeneous",
+          "effect": 0.48655812972979723,
+          "interval": "largest_absolute_mean_among_HMM_runs",
+          "method": "simultaneous",
+          "coverage": {
+            "successes": 200,
+            "n": 200,
+            "fraction": 1.0,
+            "cp_low": 0.9817246596448512,
+            "cp_high": 1.0,
+            "confidence": 0.95
+          },
+          "zero_exclusion": {
+            "successes": 17,
+            "n": 200,
+            "fraction": 0.085,
+            "cp_low": 0.05029591863024178,
+            "cp_high": 0.1326051658295526,
+            "confidence": 0.95
+          },
+          "infinite_width": {
+            "successes": 0,
+            "n": 200,
+            "fraction": 0.0,
+            "cp_low": 0.0,
+            "cp_high": 0.018275340355148807,
+            "confidence": 0.95
+          },
+          "median_width": 1.4101037047774239,
+          "finite_width_n": 200
+        }
+      ],
+      "decision": "optional exact-model construction only; keep routine fitted-reference SEs unvalidated",
+      "model_contract": "raw Poisson counts; independently fixed expectation; known zero-mean Gaussian latent covariance; independently frozen bin/gap universe",
+      "biological_validation": false
+    },
+    "independent_arithmetic_check": {
+      "job": "22844702",
+      "report": "evidence_check_v1/report.json",
+      "ranks_recounted": 1200,
+      "largest_bound_difference": 4.5447673402421174e-13,
+      "scientific_decisions_unchanged": true
+    }
+  },
+  "recovery_causes_20261107": {
+    "evidence_root": "dev/recovery_next_20261107",
+    "report": "docs/RECOVERY_CAUSES_2026-11-07.md",
+    "correction": "Retry unsuccessful finite L-BFGS solution with SLSQP on identical objective/bounds; preserve all numerical certificates.",
+    "complete_recovery": {
+      "passed": 2,
+      "cases": 5,
+      "failed_seeds": [
+        20261108,
+        20261109,
+        20261110
+      ],
+      "original_assertions_changed": false,
+      "normal_false_calls_seed_20261108_before": 9,
+      "normal_false_calls_seed_20261108_after": 10,
+      "normal_cells": 90
+    },
+    "mechanism_evidence": {
+      "optimizer": "dev/recovery_next_20261107/followup_v1/optimizer.json",
+      "oracle": "dev/recovery_next_20261107/oracle_v1/summary.json",
+      "postfit_truth_groups": [
+        "dev/recovery_next_20261107/postfit_20261108/postfit_diagnostics.json",
+        "dev/recovery_next_20261107/postfit_20261109/postfit_diagnostics.json",
+        "dev/recovery_next_20261107/postfit_20261110/postfit_diagnostics.json"
+      ],
+      "thinning_law": "dev/recovery_next_20261107/law_v1/summary.json",
+      "ablations": [
+        "dev/recovery_next_20261107/ablation_reference_depth_v1/summary.json",
+        "dev/recovery_next_20261107/ablation_no_programmes_v1/summary.json"
+      ]
+    },
+    "ablation_decision": "Both single-component controls pass 1/5 and recover none of the three failures; no default promotion.",
+    "paired_rank_regression": {
+      "fits": 998,
+      "source": "dev/recovery_next_20261107/rank_v1/summary.json",
+      "independent_evaluation": false,
+      "state_gate_false_splits": 8,
+      "null_specimens": 200,
+      "simultaneous_upper_bound": 0.08963855138,
+      "detections": 65,
+      "alternative_specimens": 200,
+      "simultaneous_lower_bound": 0.24335168576,
+      "target_met": false,
+      "membership_supported": false
+    },
+    "identification": {
+      "source": "dev/recovery_next_20261107/causes_v1/identification.json",
+      "conclusion": "Identical RNA rates under CNA and transcriptional-state explanations do not identify a biological label. Separate IID KL bound is not a bound for the fixed-balanced benchmark."
+    },
+    "independent_audit": "dev/recovery_next_20261107/evidence_v1/report.json",
+    "biological_specimens_added": 0,
+    "decision": "Retain supported numerical correction and all negative results. Recovery, biological clone validity, 5% guarantee and routine interval calibration remain unresolved."
+  },
+  "membership_followup_20261107": {
+    "evidence_root": "dev/membership_20261107",
+    "report": "docs/MEMBERSHIP_2026-11-07.md",
+    "retained_changes": [
+      "Actual refinement-round counts and explicitly uncertified stopping status",
+      "Private stop_on_map=False diagnostic; historical default retained",
+      "Conditional pair-membership entropy and no-genomic-equivalence interpretation of merges"
+    ],
+    "complete_recovery": {
+      "passed": 2,
+      "cases": 5,
+      "failed_seeds": [
+        20261108,
+        20261109,
+        20261110
+      ],
+      "original_assertions_changed": false,
+      "normal_false_calls_failed_cases": [
+        10,
+        2,
+        8
+      ],
+      "normal_cells_per_case": 90
+    },
+    "rejected_budget_candidate": {
+      "source": "dev/membership_20261107/candidate_budget_v1",
+      "full_suite_job": "22850132",
+      "python_passed": 311,
+      "python_failed": 1,
+      "python_skipped": 1,
+      "recovery_passed": 1,
+      "recovery_cases": 5,
+      "reason": "Loses the original positive control and recovers none of the three failures",
+      "rank_summary": "dev/membership_20261107/rank_v1/summary.json"
+    },
+    "conditional_membership_diagnostic": {
+      "source": "dev/membership_20261107/latent_v1/summary.json",
+      "gain_source": "dev/membership_20261107/predictive_v1/summary.json",
+      "scope": "Fitted-nuisance diagnostic in selected parents; no independent membership or confidence claim",
+      "optimizer_precision_loss_flags_retained": true
+    },
+    "event_gate": {
+      "scope": "Maximum conditional predictive evidence over divisive event proposals in the complete known-reference bin-only workflow; initial group contrasts not directly scored; no public gene/reference preprocessing or validated memberships",
+      "default_promoted": false,
+      "biological_validation": false,
+      "conditions_fixed": true,
+      "rank_alpha": 0.05,
+      "confidence_family": 30,
+      "outcomes": [
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "raw",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "NB_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "hard_NB_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "hard_state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "raw",
+          "events": 184,
+          "n": 200,
+          "rate": 0.92,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.9630554953110763,
+          "independent_family15_bound": 0.9630554953110763,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.9655745350778933
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "NB_calibrated_gate",
+          "events": 47,
+          "n": 200,
+          "rate": 0.235,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.3252347323555715,
+          "independent_family15_bound": 0.3252347323555715,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.3328170829618499
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "state_calibrated_gate",
+          "events": 4,
+          "n": 200,
+          "rate": 0.02,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.06430807106756475,
+          "independent_family15_bound": 0.06430807106756475,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.06877990097701911
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "hard_NB_calibrated_gate",
+          "events": 28,
+          "n": 200,
+          "rate": 0.14,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.21845239084471252,
+          "independent_family15_bound": 0.21845239084471246,
+          "saved_minus_reference": 5.551115123125783e-17,
+          "simultaneous_family30_bound": 0.22530536904751627
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "hard_state_calibrated_gate",
+          "events": 5,
+          "n": 200,
+          "rate": 0.025,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.07194133760697874,
+          "independent_family15_bound": 0.07194133760697874,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.0766001767201127
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "raw",
+          "events": 200,
+          "n": 200,
+          "rate": 1.0,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.9718839133409699,
+          "independent_family15_bound": 0.9718839133409701,
+          "saved_minus_reference": -2.220446049250313e-16,
+          "simultaneous_family30_bound": 0.9685214504389869
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "NB_calibrated_gate",
+          "events": 49,
+          "n": 200,
+          "rate": 0.245,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.16762725919071203,
+          "independent_family15_bound": 0.16762725919071214,
+          "saved_minus_reference": -1.1102230246251565e-16,
+          "simultaneous_family30_bound": 0.1621129203981259
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.0,
+          "independent_family15_bound": 0.0,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.0
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "hard_NB_calibrated_gate",
+          "events": 18,
+          "n": 200,
+          "rate": 0.09,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.04387681091395742,
+          "independent_family15_bound": 0.043876810913957405,
+          "saved_minus_reference": 1.3877787807814457e-17,
+          "simultaneous_family30_bound": 0.04110346122087761
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "hard_state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.0,
+          "independent_family15_bound": 0.0,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.0
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "raw",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "NB_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "hard_NB_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "hard_state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.028116086659030124,
+          "independent_family15_bound": 0.028116086659030128,
+          "saved_minus_reference": -3.469446951953614e-18,
+          "simultaneous_family30_bound": 0.031478549561013154
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "raw",
+          "events": 190,
+          "n": 200,
+          "rate": 0.95,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.9822399290396918,
+          "independent_family15_bound": 0.9822399290396918,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.9838867051973537
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "NB_calibrated_gate",
+          "events": 36,
+          "n": 200,
+          "rate": 0.18,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.2642887633343807,
+          "independent_family15_bound": 0.2642887633343806,
+          "saved_minus_reference": 1.1102230246251565e-16,
+          "simultaneous_family30_bound": 0.27151686739852476
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "state_calibrated_gate",
+          "events": 10,
+          "n": 200,
+          "rate": 0.05,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.10721945283211706,
+          "independent_family15_bound": 0.10721945283211712,
+          "saved_minus_reference": -5.551115123125783e-17,
+          "simultaneous_family30_bound": 0.1126090355343221
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "hard_NB_calibrated_gate",
+          "events": 16,
+          "n": 200,
+          "rate": 0.08,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.14610948882940253,
+          "independent_family15_bound": 0.14610948882940258,
+          "saved_minus_reference": -5.551115123125783e-17,
+          "simultaneous_family30_bound": 0.15212386179555612
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "hard_state_calibrated_gate",
+          "events": 7,
+          "n": 200,
+          "rate": 0.035,
+          "direction": "upper",
+          "simultaneous_family15_bound": 0.08651780247743689,
+          "independent_family15_bound": 0.08651780247743696,
+          "saved_minus_reference": -6.938893903907228e-17,
+          "simultaneous_family30_bound": 0.09150233725167622
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "raw",
+          "events": 200,
+          "n": 200,
+          "rate": 1.0,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.9718839133409699,
+          "independent_family15_bound": 0.9718839133409701,
+          "saved_minus_reference": -2.220446049250313e-16,
+          "simultaneous_family30_bound": 0.9685214504389869
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "NB_calibrated_gate",
+          "events": 53,
+          "n": 200,
+          "rate": 0.265,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.18497371342263932,
+          "independent_family15_bound": 0.1849737134226393,
+          "saved_minus_reference": 2.7755575615628914e-17,
+          "simultaneous_family30_bound": 0.17921076462759944
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.0,
+          "independent_family15_bound": 0.0,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.0
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "hard_NB_calibrated_gate",
+          "events": 19,
+          "n": 200,
+          "rate": 0.095,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.047419757385812965,
+          "independent_family15_bound": 0.047419757385812944,
+          "saved_minus_reference": 2.0816681711721685e-17,
+          "simultaneous_family30_bound": 0.04452469372232703
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "hard_state_calibrated_gate",
+          "events": 0,
+          "n": 200,
+          "rate": 0.0,
+          "direction": "lower",
+          "simultaneous_family15_bound": 0.0,
+          "independent_family15_bound": 0.0,
+          "saved_minus_reference": 0.0,
+          "simultaneous_family30_bound": 0.0
+        }
+      ],
+      "paired_comparisons": [
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "NB_calibrated_gate",
+          "soft_only": 0,
+          "hard_only": 0,
+          "difference": 0.0,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "evenodd",
+          "condition": "matched_nb",
+          "method": "state_calibrated_gate",
+          "soft_only": 0,
+          "hard_only": 0,
+          "difference": 0.0,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "NB_calibrated_gate",
+          "soft_only": 19,
+          "hard_only": 0,
+          "difference": 0.095,
+          "nominal_p": 3.814697265625e-06,
+          "holm_family12_p": 3.4332275390625e-05
+        },
+        {
+          "mode": "evenodd",
+          "condition": "correlated_state",
+          "method": "state_calibrated_gate",
+          "soft_only": 1,
+          "hard_only": 2,
+          "difference": -0.005,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "NB_calibrated_gate",
+          "soft_only": 31,
+          "hard_only": 0,
+          "difference": 0.155,
+          "nominal_p": 9.313225746154785e-10,
+          "holm_family12_p": 1.1175870895385742e-08
+        },
+        {
+          "mode": "evenodd",
+          "condition": "two_clones",
+          "method": "state_calibrated_gate",
+          "soft_only": 0,
+          "hard_only": 0,
+          "difference": 0.0,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "NB_calibrated_gate",
+          "soft_only": 0,
+          "hard_only": 0,
+          "difference": 0.0,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "thin",
+          "condition": "matched_nb",
+          "method": "state_calibrated_gate",
+          "soft_only": 0,
+          "hard_only": 0,
+          "difference": 0.0,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "NB_calibrated_gate",
+          "soft_only": 20,
+          "hard_only": 0,
+          "difference": 0.1,
+          "nominal_p": 1.9073486328125e-06,
+          "holm_family12_p": 1.9073486328125e-05
+        },
+        {
+          "mode": "thin",
+          "condition": "correlated_state",
+          "method": "state_calibrated_gate",
+          "soft_only": 3,
+          "hard_only": 0,
+          "difference": 0.015,
+          "nominal_p": 0.25,
+          "holm_family12_p": 1.0
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "NB_calibrated_gate",
+          "soft_only": 35,
+          "hard_only": 1,
+          "difference": 0.17,
+          "nominal_p": 1.076841726899147e-09,
+          "holm_family12_p": 1.1845258995890617e-08
+        },
+        {
+          "mode": "thin",
+          "condition": "two_clones",
+          "method": "state_calibrated_gate",
+          "soft_only": 0,
+          "hard_only": 0,
+          "difference": 0.0,
+          "nominal_p": 1.0,
+          "holm_family12_p": 1.0
+        }
+      ],
+      "decision": "Neither mode establishes the requested bound; state calibration suppresses all observed detections. Retain as rejected diagnostic, not a clone-caller replacement."
+    },
+    "identity_audit": {
+      "source": "dev/membership_20261107/evidence_v2/report.json",
+      "identical_input_specimens_per_experiment": 998,
+      "observer_changed_raw_assignments": 0,
+      "observer_probability_max_difference": 0.0,
+      "mode_audit": "dev/membership_20261107/mode_evidence_v1/report.json",
+      "thinning_observer_controls": [
+        {
+          "condition": "matched_nb",
+          "replicate": 0,
+          "posterior_identical": true
+        },
+        {
+          "condition": "correlated_state",
+          "replicate": 0,
+          "posterior_identical": true
+        },
+        {
+          "condition": "two_clones",
+          "replicate": 0,
+          "posterior_identical": true
+        }
+      ]
+    },
+    "hardware_sensitivity": {
+      "first_audit_job": "22851391",
+      "first_audit_failed": true,
+      "first_result_preserved": "dev/membership_20261107/predictive_rank_v3",
+      "same_host_replay": "dev/membership_20261107/predictive_rank_v4",
+      "different_field": "reconstructed mean only; observed counts/reference/phi/truth/reset/state hashes identical",
+      "changed_decisions": [
+        {
+          "identity": [
+            "two_clones",
+            20,
+            150
+          ],
+          "method": "NB_calibrated_gate",
+          "first": {
+            "accepted_multigroup": true,
+            "rank_p": 0.005,
+            "raw_candidate_coverage_with_abstention": 0.9883333333333333,
+            "subdivision_membership_status": "unsupported",
+            "subdivision_membership_abstention_fraction": 1.0,
+            "interpretation": "Global RNA distinction only; no pair or cell membership validation"
+          },
+          "same_host": {
+            "accepted_multigroup": false,
+            "rank_p": 1.0,
+            "raw_candidate_coverage_with_abstention": 0.0,
+            "subdivision_membership_status": "unsupported",
+            "subdivision_membership_abstention_fraction": 1.0,
+            "interpretation": "Global RNA distinction only; no pair or cell membership validation"
+          },
+          "first_scores": {
+            "score": 8.653520868198516,
+            "hard_score": 13.976392967938626,
+            "conditional_proposal_count": 1
+          },
+          "same_host_scores": {
+            "score": 0.0,
+            "hard_score": 0.0,
+            "conditional_proposal_count": 0
+          },
+          "scope": "CPU-sensitive experimental statistic; no cross-hardware numerical-certification claim"
+        },
+        {
+          "identity": [
+            "two_clones",
+            20,
+            150
+          ],
+          "method": "hard_NB_calibrated_gate",
+          "first": {
+            "accepted_multigroup": true,
+            "rank_p": 0.005,
+            "subdivision_membership_status": "unsupported"
+          },
+          "same_host": {
+            "accepted_multigroup": false,
+            "rank_p": 1.0,
+            "subdivision_membership_status": "unsupported"
+          },
+          "first_scores": {
+            "score": 8.653520868198516,
+            "hard_score": 13.976392967938626,
+            "conditional_proposal_count": 1
+          },
+          "same_host_scores": {
+            "score": 0.0,
+            "hard_score": 0.0,
+            "conditional_proposal_count": 0
+          },
+          "scope": "CPU-sensitive experimental statistic; no cross-hardware numerical-certification claim"
+        },
+        {
+          "identity": [
+            "two_clones",
+            20,
+            167
+          ],
+          "method": "NB_calibrated_gate",
+          "first": {
+            "accepted_multigroup": false,
+            "rank_p": 1.0,
+            "raw_candidate_coverage_with_abstention": 0.0,
+            "subdivision_membership_status": "unsupported",
+            "subdivision_membership_abstention_fraction": 1.0,
+            "interpretation": "Global RNA distinction only; no pair or cell membership validation"
+          },
+          "same_host": {
+            "accepted_multigroup": true,
+            "rank_p": 0.005,
+            "raw_candidate_coverage_with_abstention": 0.9983333333333333,
+            "subdivision_membership_status": "unsupported",
+            "subdivision_membership_abstention_fraction": 1.0,
+            "interpretation": "Global RNA distinction only; no pair or cell membership validation"
+          },
+          "first_scores": {
+            "score": 0.0,
+            "hard_score": 0.0,
+            "conditional_proposal_count": 0
+          },
+          "same_host_scores": {
+            "score": 1.777721707207773,
+            "hard_score": 0.0,
+            "conditional_proposal_count": 1
+          },
+          "scope": "CPU-sensitive experimental statistic; no cross-hardware numerical-certification claim"
+        }
+      ],
+      "decision": "Cross-hardware proposal eligibility remains uncertified; preserve both versions and use the strictly matched original-host replay"
+    },
+    "preservation": "dev/membership_20261107/preservation_audit.json",
+    "biological_specimens_added": 0
+  }
+}

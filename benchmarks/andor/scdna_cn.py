@@ -108,10 +108,11 @@ def load_counts(path, ann):
 def gc_correct(M, gc, strata=25):
     q = np.quantile(gc, np.linspace(0, 1, strata + 1))
     idx = np.clip(np.searchsorted(q, gc, side='right') - 1, 0, strata - 1)
-    centres = np.array([np.median(gc[idx == k]) for k in range(strata)])
+    groups = [k for k in range(strata) if np.any(idx == k)]
+    centres = np.array([np.median(gc[idx == k]) for k in groups])
     out = np.empty_like(M)
     for i in range(M.shape[0]):
-        med = np.array([np.median(M[i, idx == k]) for k in range(strata)])
+        med = np.array([np.median(M[i, idx == k]) for k in groups])
         med = np.maximum(med, 1e-3)
         out[i] = M[i] / np.interp(gc, centres, med)
     return out
@@ -146,17 +147,69 @@ def clone_consensus(cn, lab, k):
     return np.median(cn[lab == k], axis=0)
 
 
-def diff_mb(p, q, min_run=6):
+def genomic_runs(bins):
+    """Slices of ordered, adjacent half-open bins; never cross an arm or a gap."""
+    if bins.empty:
+        return []
+    start, end = bins.start.to_numpy(), bins.end.to_numpy()
+    if not np.isfinite(start).all() or not np.isfinite(end).all() or np.any(end <= start):
+        raise ValueError('genomic bins must have finite start < end')
+    chrom = bins.chromosome.astype(str).to_numpy()
+    same = chrom[1:] == chrom[:-1]
+    if np.any(same & (start[1:] < end[:-1])):
+        raise ValueError('genomic bins must be ordered and non-overlapping')
+    adjacent = same & (start[1:] == end[:-1])
+    if 'arm' in bins:
+        adjacent &= bins.arm.to_numpy()[1:] == bins.arm.to_numpy()[:-1]
+    cuts = np.r_[0, np.flatnonzero(~adjacent) + 1, len(bins)]
+    return [slice(int(a), int(b)) for a, b in zip(cuts[:-1], cuts[1:])]
+
+
+def segment_genome(x, bins, t_split):
+    out = np.empty_like(x)
+    for run in genomic_runs(bins):
+        out[run] = segment(x[run], t_split)
+    return out
+
+
+def clone_differences(cb, names, arm_id, min_frac=0.3, min_copies=1):
+    """Clone-difference truth: (clone pair, arm) rows where the two clones' bin CN differ by >= min_copies on
+    >= min_frac of the arm's bins. cb: bins x clones CN table; arm_id: arm label per bin (row order of cb)."""
+    drows = []
+    # Callable supported length, not the span across filtered bins. Legacy callers
+    # without coordinates retain equal-bin weighting; schema-2 truth always has them.
+    weights = (cb.end - cb.start).to_numpy(float) if {'start', 'end'} <= set(cb) else np.ones(len(cb))
+    if len(arm_id) != len(cb) or np.any(~np.isfinite(weights) | (weights <= 0)):
+        raise ValueError('invalid arm labels or supported bin lengths')
+    for x, ca_ in enumerate(names):
+        for cb_ in names[x + 1:]:
+            dd = (cb[ca_] - cb[cb_]).to_numpy()
+            for arm in pd.unique(arm_id):
+                mask = np.asarray(arm_id) == arm
+                finite = mask & np.isfinite(dd)
+                big_run = finite & (np.abs(dd) >= min_copies)
+                supported = weights[finite].sum()
+                frac = float(weights[big_run].sum() / supported) if supported else 0.0
+                if frac >= min_frac:
+                    drows.append(dict(clone_a=ca_, clone_b=cb_, arm=arm, frac_bins_diff=frac,
+                                      mean_diff=float(np.average(dd[big_run], weights=weights[big_run]))))
+    return pd.DataFrame(drows, columns=['clone_a', 'clone_b', 'arm', 'frac_bins_diff', 'mean_diff'])
+
+
+def diff_mb(p, q, bins, min_run=6):
+    """Supported Mb in runs of >= min_run truly adjacent differing bins."""
+    if len(p) != len(bins) or len(q) != len(bins):
+        raise ValueError('copy-number vectors and genomic bins differ in length')
     d = np.abs(p - q) >= 1
-    tot, run = 0, 0
-    for v in np.append(d, False):
-        if v:
-            run += 1
-        else:
-            if run >= min_run:
-                tot += run
-            run = 0
-    return tot * BIN / 1e6
+    lengths = (bins.end - bins.start).to_numpy(float)
+    tot = 0.0
+    for block in genomic_runs(bins):
+        ix = np.arange(len(bins))[block]
+        edges = np.diff(np.r_[False, d[block], False].astype(int))
+        for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)):
+            if b - a >= min_run:
+                tot += lengths[ix[a:b]].sum()
+    return tot / 1e6
 
 
 def main(argv=None):
@@ -191,11 +244,16 @@ def main(argv=None):
         ok = frag >= args.min_fragments
         G = gc_correct(M[ok], ann.gc.to_numpy()) / np.maximum(ann.mappability.to_numpy(), 0.5)
         R = G / G.mean(axis=1, keepdims=True)
-        same = np.append(arm_id[1:] == arm_id[:-1], False)
-        mapd = np.array([np.median(np.abs(np.diff(r)[same[:-1]])) / max(np.median(r), 1e-6) for r in R])
+        adjacent = np.zeros(max(len(ann) - 1, 0), dtype=bool)
+        for run in genomic_runs(ann):
+            adjacent[run.start:run.stop - 1] = True
+        if not adjacent.any():
+            raise ValueError('no adjacent callable DNA bins for MAPD')
+        mapd = np.array([np.median(np.abs(np.diff(r)[adjacent])) / max(np.median(r), 1e-6) for r in R])
         good = mapd <= args.max_mapd
-        S = np.vstack([np.concatenate([segment(r[arm_id == a], args.t_split) for a in pd.unique(arm_id)]) for r in R[good]])
-        segs = np.unique(np.round(S, 4))
+        if good.sum() < 3:
+            raise ValueError(f'{line}: fewer than 3 DNA cells pass depth/MAPD')
+        S = np.vstack([segment_genome(r, ann, args.t_split) for r in R[good]])
         grid = np.arange(1.5, 6.0001, 0.01)
         sos = [np.mean((np.unique(S.round(3)) * s - np.round(np.unique(S.round(3)) * s)) ** 2) for s in grid]
         scale = float(grid[int(np.argmin(sos))])
@@ -209,7 +267,7 @@ def main(argv=None):
         while True:
             ks = [k for k in np.unique(lab) if (lab == k).sum() >= args.min_clone]
             cons = {k: clone_consensus(CN, lab, k) for k in ks}
-            pairs = [(diff_mb(cons[i], cons[j]), i, j) for x, i in enumerate(ks) for j in ks[x + 1:]]
+            pairs = [(diff_mb(cons[i], cons[j], ann), i, j) for x, i in enumerate(ks) for j in ks[x + 1:]]
             if not pairs:
                 break
             dmin, i, j = min(pairs)
@@ -236,21 +294,16 @@ def main(argv=None):
         cb = pd.DataFrame({c: np.median(CN[clone == c], axis=0) for c in names})
         cb = pd.concat([ann[['chromosome', 'start', 'end', 'arm']], cb], axis=1)
         cb.to_csv(d / 'clone_bins.tsv', sep='\t', index=False)
-        ca = cb.groupby('arm', sort=False)[names].mean().reset_index()
+        ca = cb.assign(supported_bp=ann.end - ann.start).groupby('arm', sort=False).apply(
+            lambda g: pd.Series({c: np.average(g[c], weights=g.supported_bp) for c in names}),
+            include_groups=False).reset_index()
         ca.to_csv(d / 'clone_arms.tsv', sep='\t', index=False)
-        drows = []
-        for x, ca_ in enumerate(names):
-            for cb_ in names[x + 1:]:
-                dd = (cb[ca_] - cb[cb_]).to_numpy()
-                for arm, g in pd.Series(dd).groupby(arm_id, sort=False):
-                    big_run = np.abs(g.to_numpy()) >= 1
-                    frac = float(big_run.mean())
-                    if frac >= 0.3:
-                        drows.append(dict(clone_a=ca_, clone_b=cb_, arm=arm, frac_bins_diff=frac,
-                                          mean_diff=float(g[big_run].mean())))
-        pd.DataFrame(drows, columns=['clone_a', 'clone_b', 'arm', 'frac_bins_diff', 'mean_diff']).to_csv(
-            d / 'clone_differences.tsv', sep='\t', index=False)
-        qc = dict(line=line, n_read_groups=len(cells), n_pass_depth=int(ok.sum()), n_pass_mapd=int(good.sum()),
+        clone_differences(cb, names, arm_id).to_csv(d / 'clone_differences.tsv', sep='\t', index=False)
+        qc = dict(schema_version=2, interval_convention='0-based half-open',
+                  continuity='chromosome, arm and adjacent coordinates; filtered gaps break runs',
+                  callable_bp=int((ann.end - ann.start).sum()), genomic_runs=len(genomic_runs(ann)),
+                  truth_uncertainty='inferred DNA clusters; ploidy/WGD unresolved; separate RNA cells',
+                  line=line, n_read_groups=len(cells), n_pass_depth=int(ok.sum()), n_pass_mapd=int(good.sum()),
                   median_fragments=float(np.median(frag)), median_mapd=float(np.median(mapd)), ploidy_scale=scale,
                   n_bins=len(ann), clones={c: int((clone == c).sum()) for c in names},
                   n_unassigned=int((clone == 'unassigned').sum()), params=vars(args), seed=SEED)

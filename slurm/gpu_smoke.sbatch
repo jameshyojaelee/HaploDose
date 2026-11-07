@@ -16,4 +16,4 @@ export PYTHONNOUSERSITE=1 XLA_PYTHON_CLIENT_PREALLOCATE=false
 PY=/gpfs/commons/home/jameslee/micromamba/envs/haplodose/bin/python
 $PY -s -c "import jax; print(jax.default_backend(), jax.devices())"
 cd /gpfs/commons/home/jameslee/Haplodose && $PY -s -m pytest -q tests/test_hmm.py tests/test_likelihood.py
-$PY -s benchmarks/scale.py "$@"
+$PY -s benchmarks/scale.py "$@" --device gpu

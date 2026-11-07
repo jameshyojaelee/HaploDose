@@ -35,14 +35,17 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from scdna_cn import SEED, gc_correct, load_counts  # noqa: E402
+from scdna_cn import SEED, gc_correct, genomic_runs, load_counts  # noqa: E402
 
 
-def coarse_groups(arm_id, size):
+def coarse_groups(arm_id, size, bins=None):
+    if size < 1:
+        raise ValueError('coarse bin size must be positive')
     g = np.empty(len(arm_id), dtype=int)
     k = 0
-    for a in pd.unique(arm_id):
-        idx = np.flatnonzero(arm_id == a)
+    blocks = ([np.arange(len(bins))[run] for run in genomic_runs(bins)] if bins is not None
+              else [np.flatnonzero(arm_id == a) for a in pd.unique(arm_id)])
+    for idx in blocks:
         n = max(1, len(idx) // size)
         lab = np.minimum(np.arange(len(idx)) // size, n - 1)
         g[idx] = k + lab
@@ -56,14 +59,16 @@ def ploidy_scale(x):
     return float(grid[int(np.argmin(sos))])
 
 
-def arm_diffs(cn, arm_c, a, b):
+def arm_diffs(cn, arm_c, a, b, weights=None):
     d = cn[a] - cn[b]
+    weights = np.ones(len(d)) if weights is None else np.asarray(weights, dtype=float)
     out = []
     for arm in pd.unique(arm_c):
         m = arm_c == arm
         big = np.abs(d[m]) >= 1
-        if big.mean() >= 0.3:
-            out.append((arm, float(big.mean()), float(d[m][big].mean())))
+        frac = np.average(big, weights=weights[m])
+        if frac >= 0.3:
+            out.append((arm, float(frac), float(np.average(d[m][big], weights=weights[m][big]))))
     return out
 
 
@@ -84,13 +89,14 @@ def main(argv=None):
     ann_all = pd.read_csv(Path(args.bins_dir).parent / 'bin_annotation_500kb.tsv', sep='\t')
     keep = (ann_all.n_frac <= 0.1) & (ann_all.blacklist <= 0.1) & (ann_all.mappability >= 0.5)
     ann = ann_all[keep].reset_index(drop=True)
-    grp = coarse_groups(ann.arm.to_numpy(), args.coarse)
+    grp = coarse_groups(ann.arm.to_numpy(), args.coarse, bins=ann)
     K = grp.max() + 1
     onehot = np.zeros((len(ann), K), np.float32)
     onehot[np.arange(len(ann)), grp] = 1
     cbins = ann.groupby(grp).agg(chromosome=('chromosome', 'first'), start=('start', 'min'), end=('end', 'max'),
                                  arm=('arm', 'first'), gc=('gc', 'mean'), mappability=('mappability', 'mean'))
     arm_c = cbins.arm.to_numpy()
+    supported_bp = (cbins.end - cbins.start).to_numpy(float)
     arms = pd.unique(arm_c)
     arm_onehot = np.stack([(arm_c == a).astype(np.float32) for a in arms], axis=1)
     for line in args.lines:
@@ -104,14 +110,18 @@ def main(argv=None):
         # Bulk line profile from the index read groups: GC + mappability corrected, ploidy scale.
         bulk = gc_correct(M[~is_cell].sum(axis=0, keepdims=True), ann.gc.to_numpy())[0] / np.maximum(ann.mappability.to_numpy(), 0.5)
         bulk_c = (bulk @ onehot) / onehot.sum(axis=0)
-        bulk_c = bulk_c / np.mean(bulk_c)
+        bulk_c = bulk_c / np.average(bulk_c, weights=supported_bp)
         scale = ploidy_scale(bulk_c)
         C = M[is_cell] @ onehot
         cells = names[is_cell]
         frag = C.sum(axis=1)
         ok = frag >= args.min_fragments
         C, cells_ok = C[ok], cells[ok]
+        if len(C) < 3:
+            raise ValueError(f'{line}: fewer than 3 DNA cells pass depth')
         pool = C.sum(axis=0)
+        if np.any(pool <= 0):
+            raise ValueError(f'{line}: callable coarse bin has zero pooled DNA counts')
         R = (C / C.sum(axis=1, keepdims=True)) / (pool / pool.sum())
         R = gc_correct(R, cbins.gc.to_numpy(), strata=10)
         # Per-cell arm features from pooled counts per arm, relative to the pool.
@@ -131,7 +141,7 @@ def main(argv=None):
         while True:
             ks = [k for k in np.unique(lab) if (lab == k).sum() >= args.min_clone]
             cons = {k: consensus(lab == k) for k in ks}
-            pairs = [(len(arm_diffs(cons, arm_c, i, j)), i, j) for x, i in enumerate(ks) for j in ks[x + 1:]]
+            pairs = [(len(arm_diffs(cons, arm_c, i, j, supported_bp)), i, j) for x, i in enumerate(ks) for j in ks[x + 1:]]
             if not pairs:
                 break
             n, i, j = min(pairs)
@@ -156,13 +166,20 @@ def main(argv=None):
         cb = pd.concat([cbins[['chromosome', 'start', 'end', 'arm']].reset_index(drop=True),
                         pd.DataFrame(cons)], axis=1)
         cb.to_csv(d / 'clone_bins.tsv', sep='\t', index=False)
-        cb.groupby('arm', sort=False)[cn_names].mean().reset_index().to_csv(d / 'clone_arms.tsv', sep='\t', index=False)
+        ca = cb.assign(supported_bp=supported_bp).groupby('arm', sort=False).apply(
+            lambda g: pd.Series({c: np.average(g[c], weights=g.supported_bp) for c in cn_names}),
+            include_groups=False).reset_index()
+        ca.to_csv(d / 'clone_arms.tsv', sep='\t', index=False)
         cbins.assign(bulk_ratio=bulk_c, bulk_cn=bulk_c * scale).to_csv(d / 'bulk_bins.tsv', sep='\t', index=False)
         drows = [dict(clone_a=x, clone_b=y, arm=arm, frac_bins_diff=f, mean_diff=m)
-                 for i, x in enumerate(cn_names) for y in cn_names[i + 1:] for arm, f, m in arm_diffs(cons, arm_c, x, y)]
+                 for i, x in enumerate(cn_names) for y in cn_names[i + 1:] for arm, f, m in arm_diffs(cons, arm_c, x, y, supported_bp)]
         pd.DataFrame(drows, columns=['clone_a', 'clone_b', 'arm', 'frac_bins_diff', 'mean_diff']).to_csv(
             d / 'clone_differences.tsv', sep='\t', index=False)
-        qc = dict(line=line, truth='low_depth_cell_tagged_subset', n_read_groups=int(is_cell.sum()),
+        qc = dict(schema_version=2, interval_convention='0-based half-open',
+                  continuity='coarse bins never bridge chromosome, arm or filtered-coordinate gaps',
+                  callable_bp=int(supported_bp.sum()), genomic_runs=len(genomic_runs(ann)),
+                  truth_uncertainty='low-depth inferred clusters; one cluster does not establish DNA clonality',
+                  line=line, truth='low_depth_cell_tagged_subset', n_read_groups=int(is_cell.sum()),
                   n_index_read_groups=int((~is_cell).sum()), index_fragments=float(M[~is_cell].sum()),
                   n_pass_depth=int(ok.sum()), n_pass_mapd=int(ok.sum()), median_fragments=float(np.median(frag)),
                   ploidy_scale=scale, n_coarse_bins=int(K), clones={c: int((clone == c).sum()) for c in cn_names},

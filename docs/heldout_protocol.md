@@ -90,7 +90,9 @@ from that pair's test only (count reported); for E2, `ari_all` scores a missing 
 4. 2026-11-02 (~15:30), before any method run: the 8 comparator jobs submitted at the 14:24 freeze
    (22611772-75, 22611777-80) and the analysis job 22611794 were cancelled while pending, with no held-out output
    written, because a review of the job scripts found faults that would have stopped or corrupted the run. The two
-   Haplodose jobs (22611771, 22611776) were kept: their path through the 14:24 script is not affected by (a)-(c). Technical fixes only; endpoints, tests,
+   Haplodose jobs (22611771, 22611776) were kept: their path through the 14:24 script is not affected by (a)-(c). They lack the start-of-job hash check added in (d);
+   instead `code/` was hash-verified and made read-only before 22611771 started (19:26) and is re-verified after
+   the run. Technical fixes only; endpoints, tests,
    families, data and the frozen Haplodose code are unchanged.
    (a) `run_tool.sbatch` wrote each comparator's stderr to `<tool>_time.txt` inside the pool directory, and the
    run glob `<tool>_*` matched that file, so `evaluate.py` would have failed for all four comparators and the
@@ -156,3 +158,26 @@ Frozen 2026-11-02 14:24, before any held-out run. Root: `results/heldout_2026110
 - Environments: `pip_freeze_haplodose.txt`, `pip_freeze_scrna_cnv.txt` (infercnvpy and wrappers),
   `sessionInfo_cnv_field.txt` (CopyKAT, SCEVAN); R inferCNV from module R/4.4.1 as on Kinker.
 - Hardware: every held-out run on cpu `--constraint=v6`, 16 CPUs.
+
+## Results (read once, 2026-11-02 ~22:30; analysis job 22617655, eval code `analysis_sha256_v2.txt`)
+
+All 10 tool jobs completed; no failures; every tool returned output for all 127 lines. Unit = cell line.
+- **E1 (primary), n = 127.** Median per-line arm rho: Haplodose 0.832, pseudobulk 0.840, R inferCNV 0.823,
+  infercnvpy 0.799, SCEVAN 0.754, CopyKAT 0.699. Paired Wilcoxon, Holm over 5: Haplodose superior to infercnvpy
+  (median diff +0.027, CI 0.017 to 0.045, p_holm 2e-5), CopyKAT (+0.115, p_holm 1e-19) and SCEVAN (+0.076,
+  p_holm 3e-17); not superior to R inferCNV (+0.011, CI -0.002 to 0.022, p_holm 0.15); below pseudobulk (-0.010,
+  CI -0.015 to -0.000, p_holm 0.006). CIs ignore the 6 shared reference sets (amendment 5d); the cluster
+  sign-flip over sets gives nominal p = 0.031 (the minimum) vs infercnvpy, CopyKAT, SCEVAN, 0.969 vs R inferCNV (corrected 2026-11-03 from "1.0", which was the pool-level Wilcoxon; source analysis/sensitivity/summary.json e1_primary.dependence).
+- **E1 sensitivity, 83 lines not in Kinker:** same pattern (R inferCNV p_holm 0.18; pseudobulk p_holm 0.18).
+- **Amendment 5(a) common gene universe (7,241-7,831 genes per pool):** same pattern; vs pseudobulk -0.019
+  (p_holm 3.7e-8; corrected 2026-11-03 from "< 1e-10", source a_e1_common_universe.tests).
+- **Claim 1 (STATUS SOTA claim 1): does not hold.** It fails on R inferCNV in both the primary test and the
+  common-universe rule.
+- **E2, n = 47 lines:** mean ari_all Haplodose 0.136, R inferCNV 0.223, infercnvpy 0.185, CopyKAT 0.137,
+  SCEVAN 0.001. Holm over 4: no superiority (vs SCEVAN p_holm 0.027 but the median CI includes 0). 5(c) gives the
+  same picture.
+- **E3 (descriptive):** Haplodose calls 1 tumour clone in 93/127 lines, 2 in 30, 3 in 4. The comparators assign
+  most lines no tumour clone (their clone label is 0 in 93-102 lines). Coverage is >= 0.998 for every tool.
+Interpretation: on held-out data, Haplodose's arm dosage is as good as R inferCNV and better than the other
+three tools, but no better than the simple pseudobulk ratio against the same reference; its implant clone
+recovery is not better than the comparators. Nothing is tuned on MIX-seq.

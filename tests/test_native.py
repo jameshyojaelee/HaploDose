@@ -41,3 +41,55 @@ def test_native_rejects_bad_bins():
     X = random_counts(5, 4, 5)
     with pytest.raises(ValueError):
         bin_sums(X, np.array([0, 1, 9, 0, 0], np.int32), 2)
+
+
+@pytest.mark.parametrize('native', [False, True])
+def test_bin_sums_reject_unrepresentable_aggregate(native):
+    if native and not native_available():
+        pytest.skip('Rust extension not built')
+    X = sparse.csr_matrix(np.array([[2 ** 24, 1]], dtype=np.float64))
+    with pytest.raises(ValueError, match='bin sums'):
+        bin_sums(X, np.array([0, 0]), 1, native=native)
+
+
+@pytest.mark.parametrize('native', [False, True])
+def test_bin_sums_accumulate_before_casting(native):
+    if native and not native_available():
+        pytest.skip('Rust extension not built')
+    # The intermediate float32 sum 2**24 + 1 would round down; the final
+    # sum 2**24 + 2 is representable and must survive aggregation exactly.
+    X = sparse.csr_matrix(np.array([[2 ** 24, 1, 1]], dtype=np.float64))
+    bins, total = bin_sums(X, np.array([0, 0, 0]), 1, native=native)
+    assert float(bins[0, 0]) == 2 ** 24 + 2
+    assert total[0] == 2 ** 24 + 2
+    X = sparse.csr_matrix(np.array([[2 ** 24, 2]], dtype=np.float64))
+    bins, _ = bin_sums(X, np.array([0, 0]), 1, native=native)
+    assert float(bins[0, 0]) == 2 ** 24 + 2
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('mapping', [np.array([-2, 0]), np.array([0, 2]),
+                                     np.array([0]), np.array([0., 0.]), np.array([0, 2 ** 32])])
+def test_bin_identity_validation_matches_backends(native, mapping):
+    if native and not native_available():
+        pytest.skip('Rust extension not built')
+    with pytest.raises(ValueError):
+        bin_sums(sparse.csr_matrix([[1, 2]]), mapping, 1, native=native)
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('groups', [np.array([-2, 0]), np.array([0, 2]), np.array([0]), np.array([0., 0.])])
+def test_row_group_identity_validation_matches_backends(native, groups):
+    if native and not native_available():
+        pytest.skip('Rust extension not built')
+    with pytest.raises(ValueError):
+        grouped_column_sums(sparse.csr_matrix([[1], [2]]), groups, 1, native=native)
+
+
+@pytest.mark.parametrize('native', [False, True])
+def test_input_precision_is_checked_before_float32_conversion(native):
+    if native and not native_available():
+        pytest.skip('Rust extension not built')
+    X = sparse.csr_matrix(np.array([[2 ** 24 + 1]], dtype=np.int64))
+    with pytest.raises(ValueError, match='input counts'):
+        bin_sums(X, np.array([0]), 1, native=native)

@@ -8,6 +8,10 @@ from haplodose.pipeline import run
 from haplodose.simulate import write_dataset
 
 
+INPUT_CONTRACT = dict(counts_kind='raw', genome_build='hg38',
+                      coordinate_system='one-based-closed', gene_namespace='symbol')
+
+
 def _snps(n, chrom='chr1', step_cm=0.01):
     return pd.DataFrame({'chromosome': chrom, 'pos': np.arange(n) * 10_000 + 1, 'cM': np.arange(n) * step_cm,
                          'gene': ''})
@@ -43,8 +47,9 @@ def cnloh(tmp_path_factory):
         dict(frac=0.5, events=[('chr3', 0.0, 1.0, 3), ('chr8', 0.0, 1.0, 1)]),
         dict(frac=0.5, events=[('chr3', 0.0, 1.0, 3), ('chr8', 0.0, 1.0, 1), ('chr12', 0.0, 1.0, 2, 'loh')])])]
     data = write_dataset(root / 'data', specimens=spec, alleles=True, ref_patient='A', ref_cells_per_type=400)
-    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'with', alleles=data / 'alleles.tsv.gz')
-    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'without')
+    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'with',
+        alleles=data / 'alleles.tsv.gz', allele_genome_build='hg38', **INPUT_CONTRACT)
+    run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', root / 'without', **INPUT_CONTRACT)
     return root
 
 

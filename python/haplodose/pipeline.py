@@ -8,11 +8,14 @@ matrices; each specimen uses the SNPs that pass its patient's reference cells.
 from __future__ import annotations
 
 import platform
+import json
+import hashlib
 import resource
 import sys
 import time
 from dataclasses import asdict
 from importlib import metadata
+from pathlib import Path
 
 import jax
 import numpy as np
@@ -25,33 +28,170 @@ from .alleles import (AlleleParams, SpecimenAlleles, balanced_cells, joint_state
 from .alleles import cell_loglik as allele_loglik
 from ._native import bin_sums, grouped_column_sums, native_available
 from .bins import RIBOSOMAL, arm_labels, arm_starts, chromosome_starts, make_bins
+from .device import select as select_device
 from .clones import CloneParams, Rows, clone_order, fit_specimen, neighbour_graph, reference_depth_slopes, tree_table
 from .io import (CountSource, new_output_dir, open_memmap, read_cells, read_gene_list,
-                 read_positions, read_site_list, write_json, write_table)
+                 read_positions, read_site_list, write_json, write_table, validate_input_contract)
+from .provenance import start_run, finish_run, file_record
+from .confirmation import Contrast, FrozenDiscovery, assign_roles, score_confirmation, contrast_diagnostic
+from .datasets import materialize_datasets
 from .kernels.estep import cell_loglik, posteriors, programme_scores
 from .profile import log_ratio, segments_table
 from .programmes import learn_programmes
 
 QUERY_ROLES = ('tumour_epithelium', 'query')
 
+# An empty result is still a typed table, rather than a headerless file that downstream readers
+# cannot distinguish from a truncated output. Optional diagnostics may add columns to populated tables.
+EMPTY_TABLE_COLUMNS = {
+    'clones': ['specimen', 'clone', 'column', 'normal_like', 'n_cells_map', 'n_eff', 'pooled_UMI', 'pooled_count', 'count_units',
+               'resolved_segments', 'tau', 'centre', 'programme_overlap', 'programme_shift', 'allele_segments_resolved'],
+    'segments': ['specimen', 'clone', 'chromosome', 'start', 'end', 'n_genes', 'first_bin', 'last_bin',
+                 'n_bins', 'cn_state', 'state', 'log_dose', 'rna_log_effect', 'relative_state_log_ratio',
+                 'observed_mean_rna_log_ratio', 'rna_effect_estimator',
+                 'posterior', 'pooled_UMI', 'expected_UMI', 'pooled_count', 'expected_count', 'count_units',
+                 'se_log_ratio', 'se_rna_log_ratio_approx',
+                 'three_sigma_rna_log_ratio_approx', 'uncertainty_method', 'uncertainty_scope',
+                 'uncertainty_estimand', 'uncertainty_statistic', 'uncertainty_center_field',
+                 'uncertainty_status', 'posterior_effect_interval_validated',
+                 'uncertainty_calibrated', 'uncertainty_scale_z', 'scaled_se_rna_log_ratio_approx', 'resolved'],
+    'profiles': ['specimen', 'clone', 'bin', 'log_ratio', 'log_ratio_gene', 'log_dose', 'assignment_dose', 'cn_state'],
+    'differences': ['specimen', 'clone_a', 'clone_b', 'chromosome', 'start', 'end', 'n_genes', 'first_bin',
+                    'last_bin', 'n_bins', 'direction', 'mean_diff', 'z', 'posterior',
+                    'min_bin_posterior', 'posterior_rule'],
+    'log': ['specimen', 'action'],
+    'tree': ['specimen', 'node', 'left', 'right', 'genes_differing', 'n_clones'],
+    'reference_check': ['specimen', 'n_tested', 'n_called_aneuploid', 'fraction_called_aneuploid', 'expected_fraction'],
+    'specimens': ['specimen', 'n_cells', 'n_clones', 'normal_like_cells', 'beta', 'tau', 'centre', 'median_phi',
+                  'mixture', 'n_snps', 'snps_biased_in_normals', 'allele_kappa', 'spatial_graph', 'potts_lambda',
+                  'phase_switch_nu', 'in_sample_reference_cells'],
+    'allele_segments': ['specimen', 'clone', 'chromosome', 'start', 'end', 'first_snp', 'last_snp', 'n_snps',
+                        'depth', 'p_imbalanced', 'theta', 'resolved'],
+    'arms': ['specimen', 'clone', 'arm', 'n_bins', 'median_log_ratio', 'median_log_ratio_gene', 'mean_log_dose'],
+}
+
+
+def check_identities(meta, query):
+    """Each fitted specimen must belong to one patient and one dataset (patient picks the allele reference and
+    dataset the expression reference); query cells need nonempty identifiers."""
+    for col in ['specimen', 'patient', 'dataset']:
+        empty = query & (meta[col].str.strip() == '').to_numpy()
+        if empty.any():
+            raise ValueError(f'{int(empty.sum())} query cells have an empty {col} '
+                             f'(first: {meta.cell_id[empty].iloc[0]})')
+    n = meta[query].groupby('specimen')[['patient', 'dataset']].nunique()
+    mixed = n[(n > 1).any(axis=1)]
+    if len(mixed):
+        raise ValueError(f'specimens spanning more than one patient or dataset: {list(mixed.index[:5])}; give '
+                         'each patient/dataset its own specimen name')
+
 
 def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gene_mean=0.02,
         chunk=4096, query_roles=QUERY_ROLES, specimens=None, params: CloneParams | None = None,
         exclude_ribosomal=True, alleles=None, allele_exclude_genes=None, allele_exclude_sites=None,
-        allele_params: AlleleParams | None = None):
+        allele_params: AlleleParams | None = None, device='cpu', *, counts_kind=None, genome_build=None,
+        coordinate_system=None, gene_namespace=None, centromeres=None, max_gap_bp=None, discovery_fraction=None,
+        allele_genome_build=None):
+    """Schema-2 execution with declared measurement units and independent datasets.
+
+    Each dataset has its own feature universe and fit. The parent manifest indexes
+    subruns when more than one dataset is supplied. All groups remain exploratory.
+    """
+    contract = validate_input_contract(counts_kind, genome_build, coordinate_system, gene_namespace, centromeres)
+    if alleles is not None:
+        if allele_genome_build is None:
+            raise ValueError('allele_genome_build must be explicitly declared for allele inputs')
+        if allele_genome_build != genome_build:
+            raise ValueError('Allele genome build must match the expression annotation genome build')
+        contract['allele_genome_build'] = allele_genome_build
+        contract['allele_coordinate_system'] = 'one-based-SNP-POS'
+    if chunk <= 0 or bin_genes <= 0 or min_gene_mean < 0:
+        raise ValueError('chunk and bin_genes must be positive; min_gene_mean must be nonnegative')
+    with CountSource(counts, gene_namespace=gene_namespace) as source:
+        meta = read_cells(cells, source.cell_ids)
+    check_identities(meta, meta.role.isin(query_roles).to_numpy())
+    params, allele_params = params or CloneParams(), allele_params or AlleleParams()
+    if discovery_fraction is not None and (not np.isfinite(discovery_fraction) or not 0 < discovery_fraction < 1):
+        raise ValueError('discovery_fraction must be strictly between 0 and 1')
+    if discovery_fraction is not None and 'analysis_split' in meta:
+        raise ValueError('Use explicit analysis_split metadata or discovery_fraction, not both')
+    if alleles is not None and params.split_null_draws > 0:
+        raise ValueError('allele-enabled split null is unsupported: observed and null statistics must match')
+    if params.split_null_draws > 0:
+        raise ValueError('Gene-veto-enabled split null is unsupported: observed and simulated searches must '
+                         'apply the same gene evidence. Bin-only diagnostics remain available separately.')
+    arguments = dict(exclude_genes=exclude_genes, bin_genes=bin_genes, min_gene_mean=min_gene_mean,
+                     chunk=chunk, query_roles=query_roles, specimens=specimens, params=params,
+                     exclude_ribosomal=exclude_ribosomal, alleles=alleles, allele_exclude_genes=allele_exclude_genes,
+                     allele_exclude_sites=allele_exclude_sites, allele_params=allele_params, device=device,
+                     counts_kind=counts_kind, genome_build=genome_build, coordinate_system=coordinate_system,
+                     gene_namespace=gene_namespace, centromeres=centromeres, max_gap_bp=max_gap_bp,
+                     discovery_fraction=discovery_fraction, allele_genome_build=allele_genome_build)
+    out = new_output_dir(out)
+    record = start_run(out, dict(counts=counts, cells=cells, positions=positions, alleles=alleles,
+                                exclude_genes=exclude_genes, allele_exclude_genes=allele_exclude_genes,
+                                allele_exclude_sites=allele_exclude_sites, centromeres=centromeres),
+                       {**asdict(params), 'alleles': asdict(allele_params), 'bin_genes': bin_genes,
+                        'min_gene_mean': min_gene_mean, 'chunk': chunk, 'device': device,
+                        'query_roles': list(query_roles), 'specimens': specimens,
+                        'exclude_ribosomal': exclude_ribosomal,
+                        'max_gap_bp': max_gap_bp, 'discovery_fraction': discovery_fraction}, contract, mode='single_cell')
+    try:
+        if meta.dataset.nunique() == 1:
+            qc = _run_single(counts, cells, positions, out, **arguments)
+        else:
+            children = materialize_datasets(counts, meta, out / 'dataset_inputs',
+                                            gene_namespace=gene_namespace, chunk=chunk)
+            summaries = []
+            for child in children:
+                child_out = out / child['key']
+                summary = run(child['counts'], child['cells'], positions, child_out, **arguments)
+                summaries.append(summary)
+                child['output'] = str(child_out)
+                child['manifest'] = str(child_out / 'run_manifest.json')
+            write_json([{k: str(v) if isinstance(v, Path) else v for k, v in c.items()} for c in children],
+                       out / 'datasets.json')
+            record['children'] = [json.loads(Path(c['manifest']).read_text())['output']['id'] for c in children]
+            qc = {k: sum(s[k] for s in summaries) for k in
+                  ['n_cells', 'n_bins', 'n_query', 'n_fit_reference', 'n_holdout_reference', 'specimens_fitted',
+                   'n_discovery_query', 'n_confirmation_query', 'n_confirmation_scored', 'n_confirmation_unresolved']}
+            qc.update(schema_version=2, layout='independent_dataset_subruns', n_genes_used=None,
+                      wall_seconds=sum(s['wall_seconds'] for s in summaries),
+                      max_rss_gib=max(s['max_rss_gib'] for s in summaries), backend=summaries[0]['backend'])
+            write_json(qc, out / 'qc.json')
+        finish_run(out, record, backend=qc['backend'])
+        return qc
+    except Exception as error:
+        finish_run(out, record, error=error)
+        raise
+
+
+def _run_single(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gene_mean=0.02,
+        chunk=4096, query_roles=QUERY_ROLES, specimens=None, params: CloneParams | None = None,
+        exclude_ribosomal=True, alleles=None, allele_exclude_genes=None, allele_exclude_sites=None,
+        allele_params: AlleleParams | None = None, device='cpu', *, counts_kind=None, genome_build=None,
+        coordinate_system=None, gene_namespace=None, centromeres=None, max_gap_bp=None, discovery_fraction=None,
+        allele_genome_build=None):
+    """device: 'cpu' (default), 'gpu' or 'auto' for the JAX kernels (see haplodose.device)."""
+    backend = select_device(device)
     params = params or CloneParams()
     allele_params = allele_params or AlleleParams()
     t0 = time.monotonic()
     started = time.strftime('%Y-%m-%dT%H:%M:%S%z')
-    out = new_output_dir(out)
-    with CountSource(counts) as src:
+    out = Path(out)
+    with CountSource(counts, gene_namespace=gene_namespace) as src:
         meta = read_cells(cells, src.cell_ids)
-        pos = read_positions(positions)
-        exclude = read_gene_list(exclude_genes)
+        pos = read_positions(positions, genome_build=genome_build, coordinate_system=coordinate_system,
+                             gene_namespace=gene_namespace, centromeres=centromeres)
+        exclude = read_gene_list(exclude_genes, gene_namespace)
         query = meta.role.isin(query_roles).to_numpy()
+        meta = analysis_roles(meta, query, params, discovery_fraction)
+        discovery = query & meta.analysis_split.eq('discovery').to_numpy()
+        confirmation = query & meta.analysis_split.eq('confirmation').to_numpy()
         ref = meta.role.eq('reference').to_numpy()
         fit = ref & meta.ref_split.eq('fit').to_numpy()
         hold = ref & meta.ref_split.eq('holdout').to_numpy()
+        check_identities(meta, query)
         if fit.sum() < 20:
             raise ValueError('Need at least 20 fit reference cells')
         # Pass 1: gene sums per fit reference type, per dataset's query cells, and held-out references.
@@ -60,17 +200,19 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
         tkey = (meta.dataset + '|' + meta.ref_group).to_numpy()
         group = np.full(len(meta), -1, np.int32)
         group[fit] = pd.Index(fit_types).get_indexer(tkey[fit])
-        group[query] = len(fit_types) + pd.Index(datasets).get_indexer(meta.dataset[query])
-        group[hold] = len(fit_types) + len(datasets)
+        group[discovery] = len(fit_types) + pd.Index(datasets).get_indexer(meta.dataset[discovery])
         n_groups = len(fit_types) + len(datasets) + 1
         sums = np.zeros((n_groups, src.n_genes))
         for a, b, X in src.chunks(chunk):
             sums += grouped_column_sums(X, group[a:b], n_groups)
-        gene_mean = sums.sum(axis=0) / max(1, int((query | ref).sum()))
+        gene_mean = sums[:len(fit_types)].sum(axis=0) / int(fit.sum())
         mismatch = type_mismatch_genes(sums, fit_types, datasets, src.genes)
-        bins, gene_bin, used = make_bins(src.genes, pos, gene_mean, exclude | mismatch, bin_genes, min_gene_mean,
-                                         exclude_pattern=RIBOSOMAL if exclude_ribosomal else None)
+        bins, gene_bin, used = make_bins(src.genes, pos, gene_mean, exclude, bin_genes, min_gene_mean,
+                                         exclude_pattern=RIBOSOMAL if exclude_ribosomal else None,
+                                         genome_build=genome_build, centromeres=centromeres, max_gap_bp=max_gap_bp)
+        used.attrs['gene_namespace'] = gene_namespace
         J = len(bins)
+        bins['arm'] = arm_labels(bins, centromeres, genome_build)
         Y = open_memmap(out / 'bin_counts.npy', np.float32, (src.n_cells, J))
         library = np.empty(src.n_cells)
         for a, b, X in src.chunks(chunk):
@@ -94,11 +236,13 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
 
     todo = sorted(meta.specimen[query].unique()) if specimens is None else list(specimens)
     status = np.where(query, 'not_fitted', 'not_query').astype(object)
-    status[query & (Lbin < params.min_umi)] = 'insufficient_depth'
+    status[discovery & (Lbin < params.min_umi)] = 'insufficient_depth'
     clone = np.full(len(meta), '', dtype=object)
     post_max = np.full(len(meta), np.nan)
     p_normal = np.full(len(meta), np.nan)
     margin = np.full(len(meta), np.nan)
+    confirmation_status = np.where(confirmation, 'not_fitted', 'not_requested').astype(object)
+    confirmation_records, confirmation_contrasts = [], []
     programmes, depth_gamma = {}, {}
     post_store, tables = {}, {k: [] for k in ['clones', 'segments', 'profiles', 'differences', 'log', 'tree',
                                              'reference_check', 'specimens', 'allele_segments', 'arms']}
@@ -106,9 +250,9 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
     in_sample_ref = np.zeros(len(meta), bool)
     allele_snps = np.zeros(len(meta), dtype=int)
     for spec in todo:
-        rows = np.flatnonzero(query & meta.specimen.eq(spec).to_numpy() & (Lbin >= params.min_umi))
+        rows = np.flatnonzero(discovery & meta.specimen.eq(spec).to_numpy() & (Lbin >= params.min_umi))
         if len(rows) < params.min_cells:
-            status[query & meta.specimen.eq(spec).to_numpy() & (Lbin >= params.min_umi)] = 'too_few_cells'
+            status[discovery & meta.specimen.eq(spec).to_numpy() & (Lbin >= params.min_umi)] = 'too_few_cells'
             continue
         dataset = meta.dataset.iloc[rows[0]]
         cols = [t for t, key in enumerate(types) if key.startswith(dataset + '|')]
@@ -120,7 +264,7 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
             programmes[dataset] = None if params.n_programmes <= 0 else learn_programmes(
                 Y, Lbin, mu[:, cols], phi,
                 [np.flatnonzero(fit & (ref_key == types[c]) & (Lbin >= params.min_umi)) for c in cols],
-                params.n_programmes, arm_starts(bins) if params.programme_window <= 0 else reset,
+                params.n_programmes, arm_starts(bins, centromeres, genome_build) if params.programme_window <= 0 else reset,
                 params.seed, params.programme_window)
         prog = programmes[dataset]
         if params.depth_source == 'reference' and dataset not in depth_gamma:
@@ -166,6 +310,21 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
                          dict(counts=[ref_gene[k] for k in type_keys if k in ref_gene], gbin=used.bin.to_numpy(),
                               n_bins=J, in_sample=cand if n_in_sample else None)))
         tables['specimens'][-1]['in_sample_reference_cells'] = n_in_sample
+        # Confirmation eligibility must not condition on held-out test-feature counts.
+        # score_confirmation abstains when proposal counts cannot support assignment.
+        confirm_rows = np.flatnonzero(confirmation & meta.specimen.eq(spec).to_numpy())
+        if len(confirm_rows):
+            result = confirm_specimen(spec, rows, confirm_rows, meta, Y, res, tables['differences'], out)
+            scored = result.pop('scored')
+            names = result.pop('candidate_names')
+            candidate = scored['candidate']
+            eligible = candidate >= 0
+            clone[confirm_rows[eligible]] = np.asarray(names, dtype=object)[candidate[eligible]]
+            status[confirm_rows[eligible]] = 'confirmation_candidate'
+            status[confirm_rows[~eligible]] = 'confirmation_unresolved'
+            confirmation_status[confirm_rows] = np.where(eligible, 'proposal_scored', 'unusable_proposal_evidence')
+            confirmation_records.append(result)
+            confirmation_contrasts.extend(dict(specimen=spec, **row) for row in scored['contrasts'])
         hold_rows = np.flatnonzero(hold & meta.dataset.eq(dataset).to_numpy() & (Lbin >= params.min_umi))
         hold_alleles = None
         if spec_alleles is not None:
@@ -181,39 +340,139 @@ def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gen
     for rows, p in post_store.values():
         P[rows, :p.shape[1]] = p.astype(np.float16)
     P.flush()
-    cells_out = meta.assign(library_UMI=library, binned_UMI=Lbin, allele_depth=allele_depth, allele_snps=allele_snps,
+    cells_out = meta.assign(library_UMI=library, binned_UMI=Lbin,
+                            library_count=library, binned_count=Lbin, count_units='input_count_units',
+                            allele_depth=allele_depth, allele_snps=allele_snps,
                             in_sample_reference=in_sample_ref,
-                            status=status, clone=clone,
+                            status=status, clone=clone, confirmation_status=confirmation_status,
+                            evidence_status=np.where(np.isin(status, ['assigned', 'confirmation_candidate']),
+                                                     'candidate_RNA_group', 'unresolved'),
+                            calibration_status='unvalidated',
                             clone_posterior=post_max, p_normal=p_normal, assignment_margin=margin,
                             malignant_call=(query & (status == 'assigned')
                                             & ~pd.Series(clone).str.endswith('_c0').to_numpy()
                                             & (p_normal < 0.5)))
     write_table(cells_out, out / 'cells.tsv.gz')
+    write_json(dict(specimens=confirmation_records, requested=bool(confirmation.any()),
+                    statistical_independence='not_established', specimen_error_control=False,
+                    note='Frozen expression-only candidate evaluation; nominal test diagnostics do not validate DNA clones.'),
+               out / 'confirmation.json')
+    write_table(pd.DataFrame(confirmation_contrasts, columns=['specimen', 'name', 'candidate_a', 'candidate_b',
+                'direction', 'n_cells', 'test_counts', 'test_variance', 'testable', 'log_odds_contrast', 'approximate_se',
+                'signed_z', 'nominal_one_sided_p', 'multiple_testing']), out / 'confirmation.tsv')
     for name, rows in tables.items():
         if name == 'allele_segments' and allele_data is None:
             continue
-        write_table(pd.DataFrame(rows), out / f'{name}.tsv.gz' if name == 'profiles' else out / f'{name}.tsv')
-    qc = dict(haplodose=__version__, started=started, wall_seconds=time.monotonic() - t0,
+        frame = pd.DataFrame(rows) if rows else pd.DataFrame(columns=EMPTY_TABLE_COLUMNS[name])
+        write_table(frame, out / f'{name}.tsv.gz' if name == 'profiles' else out / f'{name}.tsv')
+    qc = dict(haplodose=__version__, schema_version=2, started=started, wall_seconds=time.monotonic() - t0,
               max_rss_gib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 ** 2,
               n_cells=len(meta), n_genes_input=n_genes_input, n_genes_used=len(used), n_bins=J,
               n_query=int(query.sum()), n_fit_reference=int(fit.sum()), n_holdout_reference=int(hold.sum()),
+              n_discovery_query=int(discovery.sum()), n_confirmation_query=int(confirmation.sum()),
+              n_confirmation_scored=int((status == 'confirmation_candidate').sum()),
+              n_confirmation_unresolved=int((confirmation & (status != 'confirmation_candidate')).sum()),
               reference_groups=types, specimens_fitted=len(post_store),
-              programme_variance_share={d: None if p is None else p.variance_share for d, p in programmes.items()},
+              programme_prefilter_selected_svd_variance_share={d: None if p is None else p.prefilter_selected_svd_variance_share
+                                                              for d, p in programmes.items()},
               alleles=None if allele_data is None else dict(
                   path=str(alleles), n_snps=int(allele_data.A.shape[1]), excluded_rows=allele_data.excluded,
                   exclude_genes=str(allele_exclude_genes), exclude_sites=str(allele_exclude_sites),
                   params=asdict(allele_params)),
               native_kernels=native_available(),
-              backend=jax.default_backend(), devices=[str(d) for d in jax.devices()],
+              device=device, backend=backend, devices=[str(d) for d in jax.devices()],
               host=platform.node(), python=sys.version.split()[0], versions=versions(),
               params=dict(asdict(params), bin_genes=bin_genes, min_gene_mean=min_gene_mean, chunk=chunk,
                           query_roles=list(query_roles), exclude_genes=str(exclude_genes),
-                          n_excluded_names=len(exclude), exclude_ribosomal=exclude_ribosomal),
-              n_type_mismatch_genes=len(mismatch),
+                          n_excluded_names=len(exclude), exclude_ribosomal=exclude_ribosomal,
+                          discovery_fraction=discovery_fraction),
+              n_type_mismatch_genes=len(mismatch), type_mismatch_policy='diagnostic_only',
+              feature_selection='fit_reference_only', calibration_status='unvalidated',
+              coordinate_system='zero-based-half-open', genome_build=genome_build,
+              legacy_fields={'malignant_call': 'exploratory reference-difference heuristic; not DNA-validated'},
               note='Relative RNA dosage states and RNA-inferred clones; not absolute DNA copy number '
                    'or validated DNA clones.')
     write_json(qc, out / 'qc.json')
     return qc
+
+
+def analysis_roles(meta, query, params, discovery_fraction):
+    """Assign roles from IDs/metadata before reading query counts or computing query diagnostics."""
+    meta = meta.copy()
+    explicit = 'analysis_split' in meta
+    if explicit and discovery_fraction is not None:
+        raise ValueError('Use explicit analysis_split metadata or discovery_fraction, not both')
+    if explicit:
+        if not meta.loc[query, 'analysis_split'].isin(['discovery', 'confirmation']).all():
+            raise ValueError('Query analysis_split must be discovery or confirmation')
+    else:
+        meta['analysis_split'] = np.where(query, 'discovery', 'not_query')
+    for spec in sorted(meta.loc[query, 'specimen'].unique()):
+        rows = np.flatnonzero(query & meta.specimen.eq(spec).to_numpy())
+        if discovery_fraction is not None:
+            roles = assign_roles(meta.cell_id.to_numpy()[rows], discovery_fraction=discovery_fraction,
+                                 seed=params.seed, min_discovery=params.min_cells, min_confirmation=1)
+            meta.loc[rows, 'analysis_split'] = np.where(roles['discovery'], 'discovery', 'confirmation')
+        if meta.analysis_split.iloc[rows].eq('confirmation').any():
+            if meta.analysis_split.iloc[rows].eq('discovery').sum() < params.min_cells:
+                raise ValueError(f'Specimen {spec} has fewer than min_cells discovery cells')
+    meta.loc[~query, 'analysis_split'] = 'not_query'
+    return meta
+
+
+def confirm_specimen(spec, discovery_rows, confirmation_rows, meta, Y, res, differences, out):
+    """Freeze discovery arrays and candidates; confirmation never updates the fitted result or tables."""
+    model = res['model']
+    order = clone_order(res['R'])
+    names = [f'{spec}_c{i}' for i in range(len(order))]
+    prop = np.arange(Y.shape[1]) % 2 == 0
+    test = ~prop
+    contrasts = []
+    for row in differences:
+        if row['specimen'] != spec:
+            continue
+        region = tuple(range(row['first_bin'], row['last_bin'] + 1))
+        mask = np.isin(np.arange(Y.shape[1]), region)
+        if not (test & mask).any() or not (test & ~mask).any():
+            continue
+        contrasts.append(Contrast(names.index(row['clone_a']), names.index(row['clone_b']), region,
+                                  1 if row['direction'] == 'higher' else -1, f'contrast_{len(contrasts)}'))
+    # Proposal-depth centring is determined solely from discovery cells. It approximates the original
+    # full-depth nuisance relation; no confirmation depth or counts feed back into the fitted model.
+    totals = np.concatenate([np.asarray(Y[discovery_rows[a:a + 4096]], np.float64)[:, prop].sum(axis=1)
+                             for a in range(0, len(discovery_rows), 4096)])
+    frozen = FrozenDiscovery(log_rates=model.log_rates(res['doses'])[order], phi=model.phi,
+                             proposal_mask=prop, test_mask=test, contrasts=tuple(contrasts),
+                             discovery_cell_ids=tuple(meta.cell_id.to_numpy()[discovery_rows]),
+                             depth_gamma=model.gamma, proposal_log_depth_centre=float(np.log(np.maximum(totals, 1.)).mean()),
+                             programme_loadings=None if model.programmes is None else model.W,
+                             programme_precision=None if model.programmes is None else model.programmes.prior_prec,
+                             candidate_prior=res['pi'][order])
+    key = hashlib.sha256(str(spec).encode()).hexdigest()[:16]
+    artifact_path = out / f'confirmation_artifact_{key}.json'
+    payload = asdict(frozen)
+    payload.update(specimen=spec, candidate_names=names, channel='expression_only',
+                   bins_sha256=file_record(out / 'bins.tsv')['sha256'],
+                   discovery_assignment_sha256=hashlib.sha256(np.ascontiguousarray(res['R']).tobytes()).hexdigest(),
+                   coordinate_system='zero-based-half-open', feature_roles='even_proposal_odd_test',
+                   model_scope='proposal-normalized composite NB; discovery fits may use all discovery features')
+    write_json(payload, artifact_path)
+    candidates, accum = [], [dict(counts=np.zeros((2, 2)), variance=np.zeros((2, 2)), n=np.zeros(2, int))
+                            for _ in contrasts]
+    for a in range(0, len(confirmation_rows), 4096):
+        block = confirmation_rows[a:a + 4096]
+        scored = score_confirmation(np.asarray(Y[block], np.float64), meta.cell_id.to_numpy()[block], frozen)
+        candidates.append(scored['candidate'])
+        for total, row in zip(accum, scored['contrasts']):
+            total['counts'] += row['test_counts']
+            total['variance'] += row['test_variance']
+            total['n'] += row['n_cells']
+    scored = dict(candidate=np.concatenate(candidates), evidence=scored['evidence'],
+                  contrasts=[contrast_diagnostic(c, t['counts'], t['variance'], t['n'].tolist())
+                             for c, t in zip(contrasts, accum)])
+    return dict(specimen=spec, n_discovery=len(discovery_rows), n_confirmation=len(confirmation_rows),
+                artifact=file_record(artifact_path), evidence=scored['evidence'],
+                channel='expression_only', n_frozen_contrasts=len(contrasts), scored=scored, candidate_names=names)
 
 
 def type_mismatch_genes(sums, fit_types, datasets, genes, max_log_ratio=np.log(5.0), min_counts=20):
@@ -287,7 +546,7 @@ def gene_loader(counts, used, rows, block=4096):
         order = np.argsort(glob, kind='stable')
         g = glob[order]
         parts = []
-        with CountSource(counts) as src:
+        with CountSource(counts, gene_namespace=used.attrs.get('gene_namespace', 'custom')) as src:
             for blk in np.unique(g // block):
                 sel = g[g // block == blk]
                 parts.append(src.read(int(sel[0]), int(sel[-1]) + 1)[sel - sel[0]][:, cols])
@@ -354,10 +613,10 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
     chrom = bins.chromosome.to_numpy()
     nb = len(bins)
     al = model.alleles
-    arm = arm_labels(bins)
+    arm = bins.arm.to_numpy() if 'arm' in bins else arm_labels(bins)
     for k, name in enumerate(names):
         segs = segments_table(prof['post'][k], prof['path'][k], prof['dose'][k], Yk[k], prof['E'][k], reset,
-                              model.beta, prof['tau'][k], model.pp)
+                              model.beta, prof['tau'][k], model.pp, reference_var=model.v)
         resolved = 0
         for s in segs:
             a, b = s['first_bin'], s['last_bin']
@@ -394,7 +653,8 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
                                                                                              model.base)
         tables['clones'].append(dict(specimen=spec, clone=name, column=k, normal_like=k == 0,
                                      n_cells_map=int((mapc == k).sum()), n_eff=float(R[:, k].sum()),
-                                     pooled_UMI=float(Lk[k]), resolved_segments=resolved,
+                                     pooled_UMI=float(Lk[k]), pooled_count=float(Lk[k]),
+                                     count_units='input_count_units', resolved_segments=resolved,
                                      tau=float(prof['tau'][k]), centre=float(prof['centre'][k]),
                                      programme_overlap=overlap,
                                      programme_shift=float(prof['programme_shift'][k]),
@@ -468,10 +728,12 @@ def reference_check(spec, hold_rows, ref_key, types, cols, Y, Lbin, mu, phi, res
             index, A, D = hold_alleles
             pos = index.get_indexer(rows)
             Ar, Dr = A[pos], D[pos]
-            allele = (Ar, Dr, model.B, model.alleles.params.cell_shrink)
+            allele = (Ar, Dr, model.B, model.alleles.params.cell_shrink, model.alleles.params.cell_kappa)
             Ad = Dr.copy()
-            Ad.data = rng.binomial(Dr.data.astype(np.int64), 0.5).astype(np.float32)
-            draw_allele = (Ad, Dr, model.B, model.alleles.params.cell_shrink)
+            ck = model.alleles.params.cell_kappa
+            probability = 0.5 if ck is None else rng.beta(ck / 2, ck / 2, size=len(Dr.data))
+            Ad.data = rng.binomial(Dr.data.astype(np.int64), probability).astype(np.float32)
+            draw_allele = (Ad, Dr, model.B, model.alleles.params.cell_shrink, ck)
         P = _score(np.asarray(Y[rows], np.float32), Lbin[rows], lr, phi, pi, prog, allele)
         called += int((P[:, 0] < 0.5).sum())
         m = Lbin[rows, None] * mu[None, :, c]

@@ -34,6 +34,18 @@ POSITIONS = '/gpfs/commons/home/jameslee/CRC/results/cnv_caller_benchmark/YCC230
 SEED = 20261101
 
 
+def retained_gene_indices(source, requested):
+    """Require one raw feature per retained symbol; never select an ambiguous locus."""
+    source, requested = pd.Index(source), pd.Index(requested)
+    ambiguous = sorted(set(source[source.duplicated(keep=False)]) & set(requested))
+    if ambiguous:
+        raise ValueError(f'ambiguous retained raw symbols: {ambiguous}')
+    indices = source.get_indexer(requested) if source.is_unique else pd.Index(source.drop_duplicates()).get_indexer(requested)
+    if np.any(indices < 0):
+        raise ValueError(f'retained symbols missing from raw source: {list(requested[indices < 0])}')
+    return np.flatnonzero(~source.duplicated())[indices]
+
+
 def read_library(tar, prefix):
     get = lambda s: gzip.decompress(tar.extractfile(f'{prefix}_{s}').read())
     genes = pd.read_csv(io.BytesIO(get('genes.tsv.gz')), sep='\t', header=None).iloc[:, -1].astype(str).to_numpy()  # symbol is the last column (1- or 2-column files)
@@ -69,8 +81,7 @@ def main():
     pos = pos[pos.iloc[:, 0].isin(common)]
     genes = pos.iloc[:, 0].to_numpy()
     for v in libs.values():
-        first = ~pd.Index(v['genes']).duplicated()          # duplicated symbols: first occurrence
-        idx = np.flatnonzero(first)[pd.Index(v['genes'][first]).get_indexer(genes)]
+        idx = retained_gene_indices(v['genes'], genes)
         v['X'] = v['X'][:, idx]
     lines = sorted({v['line'] for v in libs.values()})
     manifest = []
