@@ -133,6 +133,8 @@ def score_confirmation(Y, cell_ids, artifact: FrozenDiscovery):
     proposal features only. No parameters are written back and no candidate is added or selected from
     test evidence. Test contrasts use a delta-method NB variance without cross-feature covariance;
     their one-sided p-values are nominal, unadjusted and not an independent-confirmation guarantee.
+    Equal maximum scores do not identify a unique candidate and cause abstention.
+    Exact equality is a computational tie rule, not a calibrated near-tie threshold.
     """
     ids = _ids(cell_ids)
     if set(ids) & set(artifact.discovery_cell_ids):
@@ -171,9 +173,13 @@ def score_confirmation(Y, cell_ids, artifact: FrozenDiscovery):
             if scores[c, k] > best_score:
                 best_score = scores[c, k]
                 U[c] = u
-    supported = (L > 0) & np.isfinite(L) & np.isfinite(scores).any(axis=1)
+    finite = (L > 0) & np.isfinite(L) & np.isfinite(scores).any(axis=1)
+    tied = finite & ((scores == scores.max(axis=1, keepdims=True)).sum(axis=1) > 1)
+    supported = finite & ~tied
     assigned = np.where(supported, scores.argmax(axis=1), -1)
-    unresolved_reason = np.where(supported, '', np.where(L <= 0, 'no_proposal_depth', 'no_finite_candidate_score'))
+    unresolved_reason = np.where(supported, '', np.where(tied, 'tied_candidate_scores',
+        np.where(L <= 0, 'no_proposal_depth', 'no_finite_candidate_score')))
+    U[tied] = np.nan  # A candidate-specific nuisance score is also unidentified.
     diagnostics = []
     for contrast in artifact.contrasts:
         region = test & np.isin(np.arange(Y.shape[1]), contrast.features)

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import importlib.util
 import gzip
 import hashlib
 import importlib.metadata
@@ -209,6 +210,14 @@ def metrics(x, y):
                 pearson=float(pearsonr(x, y).statistic) if np.ptp(x) else 0.0)
 
 
+def arm_metrics(values, truth, arms, aggregation):
+    path = Path(__file__).with_name('arm_metrics.py')
+    spec = importlib.util.spec_from_file_location('ucan_exact_arm_metrics', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.aggregate_metrics(values, truth, arms, aggregation)
+
+
 def installed_package_record(data_root):
     import haplodose
     package = Path(haplodose.__file__).resolve().parent
@@ -257,7 +266,8 @@ def main(argv=None):
                       independent_evaluation=False, biological_n=2, locked_samples=LOCKED_SAMPLES,
                       selection='two locked tumour IDs plus all original normal samples; no DNA selection',
                       source_validation=verified, source_files=[file_record(p) for p in sources],
-                      executed_script=file_record(__file__), installed_candidate=package,
+                      executed_script=file_record(__file__),
+                      arm_scoring=file_record(Path(__file__).with_name('arm_metrics.py')), installed_candidate=package,
                       argv=sys.argv if argv is None else argv, slurm_job=os.environ.get('SLURM_JOB_ID'),
                       hostname=os.uname().nodename, units='natural_log_relative_rate',
                       coordinate_contract='hg38, symbol, one-based-closed input; internal zero-based-half-open',
@@ -342,11 +352,9 @@ def main(argv=None):
         for name, values in methods.items():
             frame[name] = values
             score_rows.append(dict(sample=sample, method=name, resolution='common_bin', **metrics(values[common], truth[common])))
-            arm_table = pd.DataFrame(dict(arm=arms[common], value=values[common], truth=truth[common]))
             for aggregation in ('median', 'mean'):
-                a = arm_table.groupby('arm')[['value', 'truth']].agg(aggregation)
                 score_rows.append(dict(sample=sample, method=name, resolution='common_arm_' + aggregation,
-                                       **metrics(a.value.to_numpy(), a.truth.to_numpy())))
+                                       **arm_metrics(values[common], truth[common], arms[common], aggregation)))
         frame['dna_gene_coverage'] = [float(np.isfinite(truth_genes[gene_bin == j]).mean()) for j in range(len(bins))]
         bin_rows.append(frame)
         stages = [('gene_to_count_weighted_bin', 'gene_ratio', 'pooled_bin_ratio'),

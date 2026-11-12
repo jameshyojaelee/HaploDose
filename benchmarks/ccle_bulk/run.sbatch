@@ -9,7 +9,7 @@
 # CCLE bulk sub-arm benchmark (prespecified SOTA claim 3). One stage per job:
 #   input        make_input.py -> ROOT/input (GTEx v10 tissue-matched normals)
 #   group GROUP  frozen 14:24 HaploDose bulk (same flags as the TCGA run) + infercnvpy windows for that group
-#   score        score.py (subarm.py with hg38 DepMap ABSOLUTE truth + the primary test) -> ROOT/score
+#   score        score.py (subarm.py with hg38 DepMap PureCN truth + the primary test) -> ROOT/score
 # HaploDose code: results/heldout_20261102_1424/code (read-only), hash-checked at start of every stage.
 # Evaluation code hashes are written to ROOT/eval_code_sha256.txt by the submit step and checked here.
 # Usage: sbatch -J ccle_<stage> --output=ROOT/logs/%x_%j.out run.sbatch ROOT STAGE [GROUP]

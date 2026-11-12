@@ -2,14 +2,14 @@
 lineage group, with GTEx v10 tissue-matched normals (user decision 2026-11-02).
 
 Tumours: DepMap 24Q4 cancer cell lines with a default RNA profile (RNA-SeQC gene counts) and a default DNA profile
-that has ABSOLUTE segments; OncotreePrimaryDisease 'Non-Cancerous' dropped. Sample name = ModelID.
+that has PureCN absolute segments; OncotreePrimaryDisease 'Non-Cancerous' dropped. Sample name = ModelID.
 Normals: GTEx v10 RNA-SeQC 2.4.2 gene reads of the tissue(s) in GROUPS, RNA-seq freeze samples only, at most
 MAX_NORMALS per group drawn with a fixed seed. Both matrices are RNA-SeQC counts, matched by unversioned Ensembl
 gene ID to protein-coding chr1-22 genes of Ensembl 112 (benchmarks/ucan_bulk/make_input.py gene table).
 Groups: the lineage map below, fixed before any CCLE or GTEx expression value was read. A lineage with no GTEx
 organ match is excluded; a group with < MIN_LINES lines is excluded (recorded in qc.tsv).
 Also writes truth for scoring: absolute_segments.tsv.gz (Sample, chromosome, Start, End, Modal_Total_CN; hg38)
-and absolute_ploidy.tsv (ploidy = length-weighted mean ABSOLUTE total CN over chr1-22 segments), plus
+and absolute_ploidy.tsv (ploidy = length-weighted mean PureCN total CN over chr1-22 segments), plus
 dev_lines.tsv (ModelIDs whose DepMap CN was used as truth in development: Kinker, MIX-seq).
 
 Usage: make_input.py OUTDIR

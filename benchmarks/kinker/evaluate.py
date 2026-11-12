@@ -1,6 +1,6 @@
 """Score Haplodose on the Kinker 2020 rotations against DepMap 24Q4 CN, with a pseudobulk baseline.
 
-Identity-checked scorer revision 1.1. Existing frozen scores are unchanged;
+Identity- and population-checked scorer revision 1.2. Existing frozen scores are unchanged;
 reruns require a fresh destination and remain retrospective development evidence.
 
 Per query line (one single-line specimen in one rotation):
@@ -12,7 +12,9 @@ Per query line (one single-line specimen in one rotation):
   same genes as Haplodose, median-centred, arm median. It is the scRNA analogue of the bulk naive method.
 Per line: Spearman across arms (arms with >= 5 genes); on DNA-informative arms (|truth| >= 0.2) the share
 with the right sign. Methods compared per line (unit = cell line) by paired Wilcoxon, Holm over pairs.
-Also per specimen: tumour clones (1 expected) and the fraction of cells called malignant.
+Also per specimen: candidate tumour groups and the fraction of cells called malignant.
+Cell-line origin does not establish a single genomic clone. CPM-derived counts
+and cross-culture DepMap DNA do not establish count-model calibration or membership.
 Usage: evaluate.py [--tool NAME] INPUT_DIR DEST RUN_DIR...  (NAME labels the run columns; default haplodose)
 """
 import itertools
@@ -30,7 +32,49 @@ from statsmodels.stats.multitest import multipletests
 CEN = Path(__file__).resolve().parents[2] / 'python/haplodose/data/centromeres_hg38.tsv'
 INFORMATIVE = 0.2
 MIN_GENES = 5
-SCORE_VERSION = '1.1_identity_checked'
+SCORE_VERSION = '1.2_complete_population'
+
+
+def specimen_profile(profiles, cell_clones, bins, quantity):
+    """Cell-weighted mean log effect, requiring the entire declared population.
+
+    This is a mean of clone log effects, not a pooled-count log ratio. A missing
+    clone/bin/value is unavailable evidence, never a zero or a smaller population.
+    """
+    bins = unique_ids(bins, 'scored bins')
+    n = cell_clones.fillna('').value_counts()
+    if len(cell_clones) == 0:
+        raise ValueError('Cannot score an empty query population')
+    if profiles[['clone', 'bin']].duplicated().any():
+        raise ValueError('Ambiguous duplicate clone/bin profiles')
+    values = profiles.pivot(index='bin', columns='clone', values=quantity).reindex(
+        index=bins, columns=n.index).to_numpy(dtype=float)
+    finite = np.isfinite(values)
+    # Blank assignments have no identified profile even if a malformed file has one.
+    finite[:, n.index.astype(str).str.strip() == ''] = False
+    covered = (finite * n.to_numpy()[None, :]).sum(axis=1)
+    fraction = float(covered.min() / len(cell_clones)) if len(bins) else 0.0
+    if not finite.all() or not len(bins):
+        return pd.Series(np.nan, index=bins), fraction, 'incomplete_population_or_profile'
+    result = (values * n.to_numpy()[None, :]).sum(axis=1) / len(cell_clones)
+    return pd.Series(result, index=bins), fraction, 'complete'
+
+
+def paired_method_tests(lines, methods):
+    """One shared population and a fixed Holm family, retaining missing tests."""
+    paired = lines[[f'rho_{m}' for m in methods]].replace([np.inf, -np.inf], np.nan).dropna()
+    tests = []
+    for a, b in itertools.combinations(methods, 2):
+        x = paired[[f'rho_{a}', f'rho_{b}']]
+        p = (1.0 if np.array_equal(x.iloc[:, 0], x.iloc[:, 1]) else
+             float(wilcoxon(x.iloc[:, 0], x.iloc[:, 1]).pvalue)) if len(x) else np.nan
+        tests.append(dict(a=a, b=b, n=len(x), median_a=x.iloc[:, 0].median(), median_b=x.iloc[:, 1].median(),
+                          a_higher=int((x.iloc[:, 0] > x.iloc[:, 1]).sum()), p=p))
+    tests = pd.DataFrame(tests)
+    # Missing tests remain in the multiplicity family (p=1 for adjustment only).
+    tests['p_holm'] = multipletests(tests.p.fillna(1), method='holm')[1]
+    tests.loc[tests.p.isna(), 'p_holm'] = np.nan
+    return paired, tests
 
 
 def unique_ids(values, label):
@@ -93,22 +137,24 @@ def score_run(inp, run, X, genes, cells, cn, cen, tool):
         lr = np.log((y + 0.5) / (E + 0.5))
         g = pd.DataFrame({'arm': used.arm.to_numpy(), 'truth': truth_g, 'pseudobulk': lr - np.median(lr)})
         # Haplodose: clone profiles weighted by cells per clone.
-        n = c.clone.value_counts()
-        p = prof[prof.specimen.eq(spec) & prof.clone.isin(n.index)]
+        p = prof[prof.specimen.eq(spec)]
+        coverage = {}
         for col in ['log_ratio', 'log_dose'] + (['log_ratio_gene'] if 'log_ratio_gene' in p.columns else []):
-            pv = p.pivot(index='bin', columns='clone', values=col)
-            nn = n[n.index.isin(pv.columns)]                 # clones without a profile are left out
-            b = (pv[nn.index] * nn.to_numpy()).sum(axis=1) / nn.sum()
+            b, fraction, reason = specimen_profile(p, c.clone, used.bin.unique(), col)
+            coverage[f'profile_fraction_{tool}_{col}'] = fraction
+            coverage[f'profile_status_{tool}_{col}'] = reason
             g[f'{tool}_{col}'] = used.bin.map(b).to_numpy()
         a = g.groupby('arm').agg(['median', 'size'])
         keep = a[('truth', 'size')] >= MIN_GENES
         a = a.loc[keep].xs('median', axis=1, level=1)
         d = dict(specimen=spec, line=line, pool=ds, n_cells=len(c), n_arms=len(a),
                  informative_arms=int((a.truth.abs() >= INFORMATIVE).sum()))
+        d.update(coverage)
         inf = a.truth.abs() >= INFORMATIVE
         for m in [f'{tool}_{x}' for x in ('log_ratio', 'log_dose', 'log_ratio_gene') if f'{tool}_{x}' in g] + ['pseudobulk']:
             d[f'rho_{m}'] = spearmanr(a[m], a.truth)[0]
-            d[f'sign_{m}'] = float((np.sign(a.loc[inf, m]) == np.sign(a.loc[inf, 'truth'])).mean()) if inf.any() else np.nan
+            d[f'sign_{m}'] = (float((np.sign(a.loc[inf, m]) == np.sign(a.loc[inf, 'truth'])).mean())
+                              if inf.any() and np.isfinite(a.loc[inf, m]).all() else np.nan)
         rows.append(d)
         tum = clones[clones.specimen.eq(spec) & ~clones.normal_like]
         spec_rows.append(dict(specimen=spec, line=line, tumour_clones=len(tum),
@@ -130,16 +176,14 @@ def main(inp, dest, *runs, tool='haplodose'):
     specs.to_csv(dest / 'specimens.tsv', sep='\t', index=False)
     methods = [m for m in (f'{tool}_log_ratio', f'{tool}_log_dose', f'{tool}_log_ratio_gene', 'pseudobulk')
                if f'rho_{m}' in lines]
-    tests = []
-    for a, b in itertools.combinations(methods, 2):
-        x = lines[[f'rho_{a}', f'rho_{b}']].dropna()
-        tests.append(dict(a=a, b=b, n=len(x), median_a=x.iloc[:, 0].median(), median_b=x.iloc[:, 1].median(),
-                          a_higher=int((x.iloc[:, 0] > x.iloc[:, 1]).sum()), p=wilcoxon(x.iloc[:, 0], x.iloc[:, 1]).pvalue))
-    tests = pd.DataFrame(tests)
-    tests['p_holm'] = multipletests(tests.p, method='holm')[1]
+    # One fixed population for the whole comparator family. Keep absent evidence
+    # visible in coverage; dropping a failing method cannot improve a verdict.
+    paired, tests = paired_method_tests(lines, methods)
     tests.to_csv(dest / 'paired_tests.tsv', sep='\t', index=False)
     summary = dict(score_version=SCORE_VERSION, evidence_role='retrospective_development',
                    n_lines=int(len(lines)), median_informative_arms=float(lines.informative_arms.median()),
+                   complete_comparator_lines=int(len(paired)),
+                   method_finite_lines={m: int(np.isfinite(lines[f'rho_{m}']).sum()) for m in methods},
                    median_rho={m: float(lines[f'rho_{m}'].median()) for m in methods},
                    mean_sign_informative={m: float(lines[f'sign_{m}'].mean()) for m in methods},
                    tumour_clones_distribution=specs.tumour_clones.value_counts().sort_index().to_dict(),

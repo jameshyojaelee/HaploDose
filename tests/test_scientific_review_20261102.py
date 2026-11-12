@@ -50,9 +50,12 @@ def test_matched_differences_disjoint_depths_untestable():
     m = SpecimenModel(Rows(Y, np.arange(len(Y))), Y.sum(axis=1), np.full((J, 1), 1.0 / J), _reset(J, (0, 120)),
                       np.full(J, 0.05), CloneParams(n_programmes=0), gamma=np.zeros(J))
     labels = np.repeat([1, 2, 3], 150)
-    disjoint, overlapping = m.matched_differences(labels, [(1, 2), (1, 3)])
+    disjoint, overlapping = m.matched_differences(labels, [(1, 2), (1, 3)], report_depth_balance=True)
     assert not disjoint['testable'] and disjoint['segments'] == [] and disjoint['distance'] == float('inf')
+    assert disjoint['untestable_reason'] == 'no_shared_depth_stratum_mass'
+    assert disjoint['weighted_log_depth_wasserstein'] is None
     assert overlapping['testable'] and np.isfinite(overlapping['distance'])
+    assert np.isfinite(overlapping['weighted_log_depth_wasserstein'])
 
 
 # 2. Allele veto and mirrored imbalance --------------------------------------------------------------------

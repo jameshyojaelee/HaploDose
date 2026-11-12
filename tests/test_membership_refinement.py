@@ -55,7 +55,7 @@ def test_stable_map_labels_do_not_stop_changing_profiles():
 def test_merge_reports_assigned_pool_uncertainty_without_equivalence_claim():
     m=SpecimenModel.__new__(SpecimenModel)
     m.params=SimpleNamespace(min_cells=30)
-    m.J=1;m.thin=False;m.Ak=None;m.allele_post=None;m.graph=None;m.log=[]
+    m.J=1;m.thin=False;m.Ak=None;m.alleles=None;m.allele_post=None;m.graph=None;m.log=[]
     R=np.tile([.1,.46,.44],(60,1));R[30:,1:]=R[30:,1:][:,::-1]
     m.matched_differences=lambda labels,pairs:[dict(segments=[],distance=0.,testable=True)]
     m.supported=lambda *args,**kwargs:[]

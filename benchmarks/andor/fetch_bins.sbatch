@@ -13,24 +13,26 @@
 # the cell barcode as SM (checked on SNU-638 and in the original SNU-601 BAM).
 # Read filter: primary, read 1 of a proper pair (flag 0x42 set), not unmapped/secondary/QC-fail/
 # duplicate/supplementary (0xF04 clear), MAPQ >= 30. One count per fragment.
-# Usage: sbatch -J andor_fetch_<line> fetch_bins.sbatch LINE RUN
+# Usage: sbatch -J andor_fetch_<line> fetch_bins.sbatch LINE RUN [OUT_BINS_DIR]
+# Use a fresh versioned OUT_BINS_DIR for corrected counts; existing bins are never replaced.
 set -euo pipefail
 LINE=$1 RUN=$2
 D=data/external/andor2020_scdna
-mkdir -p $D/sra $D/bins
+OUT_BINS=${3:-$D/bins}
+mkdir -p "$D/sra" "$OUT_BINS"
 module load SRA-Toolkit/3.2.1 samtools/1.23.1
 # Resumes; also fetches reference contigs an earlier run missed. Up to 3 tries; a contig that still fails
 # (MKN-45: unplaced KI/GL contigs, "cannot get remote location") is left out, since only chr1-22 are counted.
 for i in 1 2 3; do prefetch --max-size 200G -O $D/sra $RUN && break || { echo "prefetch try $i failed"; sleep 60; }; done
 vdb-validate $D/sra/$RUN/$RUN.sra
-OUT=$D/bins/${LINE}.tsv.gz
+OUT=$OUT_BINS/${LINE}.tsv.gz
 [[ ! -e $OUT ]] || { echo "exists: $OUT"; exit 0; }
 # --header-only printed nothing on a remote run; a tiny region query prints the full header.
-sam-dump --aligned-region chr1:1000000-1001000 $D/sra/$RUN/$RUN.sra | grep '^@RG' > $D/bins/${LINE}.rg.txt
+sam-dump --aligned-region chr1:1000000-1001000 $D/sra/$RUN/$RUN.sra | grep '^@RG' > "$OUT_BINS/${LINE}.rg.txt"
 sam-dump --primary $D/sra/$RUN/$RUN.sra \
   | samtools view -f 0x42 -F 0xF04 -q 30 - \
   | awk -F'\t' -v OFS='\t' '{rg=""; for (i=12; i<=NF; i++) if (substr($i,1,5)=="RG:Z:") {rg=substr($i,6); break}
-        if (rg=="") next; c[rg OFS $3 OFS int($4/500000)]++; n++}
+        if (rg=="") next; c[rg OFS $3 OFS int(($4-1)/500000)]++; n++}
         END {for (k in c) print k, c[k]; print "#fragments", n > "/dev/stderr"}' \
   | gzip -c > $OUT.tmp
 mv $OUT.tmp $OUT

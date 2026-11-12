@@ -176,3 +176,77 @@ def test_kinker_permuted_identity_alignment_preserves_named_counts(kinker_identi
     source = np.array([[7, 2, 11]])
     indexer = kinker_identity_scorer.checked_indexer(['B', 'A', 'C'], ['A', 'C'], 'genes')
     np.testing.assert_array_equal(source[:, indexer], [[2, 11]])
+
+
+def test_kinker_profile_mean_preserves_cell_population_and_bin_identity(kinker_identity_scorer):
+    profile = pd.DataFrame(dict(clone=['A', 'B', 'A', 'B'], bin=[9, 9, 2, 2],
+                                log_ratio=[2., -2., 4., 0.]))
+    actual, fraction, reason = kinker_identity_scorer.specimen_profile(
+        profile.iloc[[3, 0, 2, 1]], pd.Series(['A', 'B', 'A']), [2, 9], 'log_ratio')
+    np.testing.assert_allclose(actual, [8/3, 2/3], rtol=0, atol=0)
+    assert fraction == 1 and reason == 'complete'
+
+
+@pytest.mark.parametrize('defect', ['missing_clone', 'missing_bin', 'nan', 'infinite', 'unassigned'])
+def test_kinker_incomplete_profile_cannot_become_zero_or_smaller_population(kinker_identity_scorer, defect):
+    profile = pd.DataFrame(dict(clone=['A', 'B', 'A', 'B'], bin=[0, 0, 1, 1],
+                                log_ratio=[2., -2., 4., 0.]))
+    cells = pd.Series(['A', 'A', 'B'])
+    if defect == 'missing_clone':
+        profile = profile[profile.clone.ne('B')]
+    elif defect == 'missing_bin':
+        profile = profile.drop(index=3)
+    elif defect in ('nan', 'infinite'):
+        profile.loc[3, 'log_ratio'] = np.nan if defect == 'nan' else np.inf
+    else:
+        cells.iloc[2] = np.nan
+    result, fraction, reason = kinker_identity_scorer.specimen_profile(profile, cells, [0, 1], 'log_ratio')
+    assert result.isna().all()
+    assert fraction == 2/3 and reason == 'incomplete_population_or_profile'
+
+
+def test_kinker_duplicate_clone_bin_is_ambiguous(kinker_identity_scorer):
+    profile = pd.DataFrame(dict(clone=['A', 'A'], bin=[0, 0], log_ratio=[1., 2.]))
+    with pytest.raises(ValueError, match='duplicate clone/bin'):
+        kinker_identity_scorer.specimen_profile(profile, pd.Series(['A']), [0], 'log_ratio')
+
+
+def test_kinker_comparator_family_uses_same_population(kinker_identity_scorer):
+    lines = pd.DataFrame(dict(rho_A=[.2, .3, .4], rho_B=[.1, .3, .2], rho_C=[np.nan, .3, .2]))
+    population, tests = kinker_identity_scorer.paired_method_tests(lines, ['A', 'B', 'C'])
+    assert population.index.tolist() == [1, 2]
+    assert tests.n.tolist() == [2, 2, 2]
+    assert set(zip(tests.a, tests.b)) == {('A', 'B'), ('A', 'C'), ('B', 'C')}
+    assert tests.loc[tests.a.eq('B') & tests.b.eq('C'), 'p'].iloc[0] == 1
+
+
+def test_kinker_unavailable_comparator_keeps_family_without_a_verdict(kinker_identity_scorer):
+    lines = pd.DataFrame(dict(rho_A=[.2, .3], rho_B=[.1, .4], rho_C=[np.nan, np.nan]))
+    population, tests = kinker_identity_scorer.paired_method_tests(lines, ['A', 'B', 'C'])
+    assert len(population) == 0 and len(tests) == 3
+    assert tests.n.eq(0).all() and tests.p.isna().all() and tests.p_holm.isna().all()
+
+
+def test_kinker_unavailable_population_has_no_sign_score(tmp_path, kinker_identity_scorer):
+    from scipy import sparse
+    inp, run = tmp_path/'input', tmp_path/'run'
+    inp.mkdir(); run.mkdir()
+    genes = [f'G{i}' for i in range(5)]
+    pd.DataFrame(dict(gene=genes, chromosome=['1']*5, start=range(5))).to_csv(
+        inp/'positions.tsv', sep='\t', index=False)
+    pd.DataFrame(dict(cell_id=['q1', 'q2', 'r'], design=['single_line', 'single_line', 'reference'],
+        specimen=['S', 'S', 'R'], truth_line=['L', 'L', 'REF'], dataset=['D']*3,
+        role=['query', 'query', 'reference'], ref_split=['', '', 'fit'], line=['L', 'L', 'REF'],
+        umi=[5]*3, clone=['A', 'B', ''], malignant_call=[True, True, False])).to_csv(
+            run/'cells.tsv.gz', sep='\t', index=False)
+    pd.DataFrame(dict(gene=genes, bin=[0]*5)).to_csv(run/'genes.tsv.gz', sep='\t', index=False)
+    pd.DataFrame(dict(bin=[0])).to_csv(run/'bins.tsv', sep='\t', index=False)
+    pd.DataFrame(dict(specimen=['S'], clone=['A'], bin=[0], log_ratio=[1.], log_dose=[1.])).to_csv(
+        run/'profiles.tsv.gz', sep='\t', index=False)
+    pd.DataFrame(dict(specimen=['S'], clone=['A'], normal_like=[False])).to_csv(
+        run/'clones.tsv', sep='\t', index=False)
+    scores, _ = kinker_identity_scorer.score_run(inp, run, sparse.csr_matrix(np.ones((3, 5))),
+        genes, ['q1', 'q2', 'r'], pd.DataFrame(dict(L=np.ones(5), REF=np.zeros(5)), index=genes),
+        pd.Series({'chr1': 100}), 'haplodose')
+    assert np.isnan(scores.sign_haplodose_log_ratio.iloc[0])
+    assert scores.profile_fraction_haplodose_log_ratio.iloc[0] == .5

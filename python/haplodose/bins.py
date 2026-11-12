@@ -1,7 +1,9 @@
 """Fine genomic bins of consecutive expressed genes.
 
-Bins are the unit for per-cell sufficient statistics (UMI sums). Segments are
-unions of bins, so one pass over the counts serves every later iteration.
+Bins provide per-cell count summaries for the binned working models. These
+sums are not generally sufficient statistics for heterogeneous gene-level
+count models. Segments are unions of bins, so one count pass serves later
+iterations.
 """
 from __future__ import annotations
 
@@ -29,7 +31,11 @@ def make_bins(genes, positions: pd.DataFrame, gene_mean, exclude=frozenset(),
               *, genome_build='hg38', centromeres=None, max_gap_bp=None):
     """Returns (bins table, gene_bin array with -1 for unused genes, used-gene table).
 
-    Genes named in `exclude` or matching `exclude_pattern` (None: none) are never features."""
+    Genes named in `exclude` or matching `exclude_pattern` (None: none) are never features.
+    The default ribosomal category filter uses biological symbols. Non-symbol
+    namespaces require an explicit positions.gene_symbol annotation; identifiers
+    are never guessed or merged. Other explicit regexes operate on feature IDs.
+    """
     if not isinstance(bin_genes, (int, np.integer)) or bin_genes <= 0:
         raise ValueError('bin_genes must be a positive integer')
     if not np.isfinite(min_mean) or min_mean < 0:
@@ -50,10 +56,23 @@ def make_bins(genes, positions: pd.DataFrame, gene_mean, exclude=frozenset(),
     keep = (table.chromosome.isin(chromosomes) & table.start.notna()
             & (table['mean'] >= min_mean) & ~key.isin(exclude))
     if exclude_pattern is not None:
-        keep &= ~key.str.match(exclude_pattern)
+        labels = key
+        if exclude_pattern == RIBOSOMAL and namespace != 'symbol':
+            if 'gene_symbol' not in pos:
+                raise ValueError('Ribosomal filtering requires positions.gene_symbol for non-symbol '
+                                 'IDs; supply annotation or explicitly disable the category filter')
+            labels = key.map(pos.gene_symbol)
+            needed = labels[keep]
+            if (needed.isna().any() or needed.map(lambda x: not isinstance(x, str) or not x.strip()).any()
+                    or needed.astype(str).str.strip().str.lower().isin(['na', 'nan', 'none', 'null']).any()):
+                raise ValueError('Retained features require nonempty, explicit gene_symbol annotation')
+            labels = labels.fillna('').astype(str).str.strip().str.upper()
+            table['gene_symbol'] = labels
+        keep &= ~labels.str.match(exclude_pattern)
     table = table[keep].copy()
     table['rank'] = chromosome_rank(table.chromosome)
-    table = table.sort_values(['rank', 'start', 'column'], kind='stable')
+    # Shared genomic starts must not make bin membership depend on count-column order.
+    table = table.sort_values(['rank', 'start', 'gene'], kind='stable')
     cen = read_centromeres(genome_build, centromeres)
     boundaries = table.chromosome.map(cen)
     if boundaries.isna().any():
@@ -87,7 +106,10 @@ def make_bins(genes, positions: pd.DataFrame, gene_mean, exclude=frozenset(),
     if not rows:
         raise ValueError('No genomic bins: check gene names, positions and expression filter')
     bins = pd.DataFrame(rows)
-    used = pd.concat(used)[['gene', 'column', 'chromosome', 'start', 'end', 'mean', 'bin']]
+    columns = ['gene', 'column', 'chromosome', 'start', 'end', 'mean', 'bin']
+    if 'gene_symbol' in table:
+        columns.append('gene_symbol')
+    used = pd.concat(used)[columns]
     return bins, gene_bin, used
 
 

@@ -1,5 +1,6 @@
 """Scorer invariants: specimen identity, callable domains, calibration and simulation truth."""
 import importlib.util
+from fractions import Fraction
 from pathlib import Path
 import sys
 
@@ -202,6 +203,45 @@ def test_threshold_weights_patients_equally_not_by_window_count():
     scores[0, 0] = 0
     neutral = np.isfinite(scores)
     assert loss_threshold(scores, neutral, [0, 1], fpr=.25) == 0
+
+
+def exact_patient_quantile(scores, neutral, indices, q):
+    masses = {}
+    patients = 0
+    for j in indices:
+        values = [float(x) for x, ok in zip(scores[:, j], neutral[:, j]) if ok and np.isfinite(x)]
+        if not values:
+            continue
+        patients += 1
+        for value in values:
+            masses[value] = masses.get(value, Fraction(0)) + Fraction(1, len(values))
+    total = Fraction(0)
+    for value in sorted(masses):
+        total += masses[value]
+        if total >= Fraction(str(q)) * patients:
+            return value
+    return np.nan
+
+
+def test_exact_threshold_is_invariant_to_identical_window_replication():
+    for copies in range(1, 101):
+        scores = np.tile(np.arange(20.), (copies, 1))
+        assert loss_threshold(scores, np.ones_like(scores, bool), np.arange(20)) == 0.
+
+
+def test_exact_threshold_matches_exhaustive_fraction_distribution():
+    rng = np.random.default_rng(20261108)
+    for _ in range(100):
+        scores = rng.integers(-3, 5, (17, 7)).astype(float)
+        scores[rng.random(scores.shape) < .1] = np.nan
+        neutral = rng.random(scores.shape) < .6
+        neutral[:, 0] = False
+        indices = rng.integers(0, 7, 11)
+        for q in (.01, .05, .1, .25, .5, .9):
+            expected = exact_patient_quantile(scores, neutral, indices, q)
+            assert loss_threshold(scores, neutral, indices, fpr=q) == expected
+            assert loss_threshold(scores[::-1], neutral[::-1], indices[::-1], fpr=q) == expected
+    assert np.isnan(loss_threshold(scores, np.zeros_like(neutral), indices))
 
 
 def test_uncalibrated_loss_is_missing_not_a_false_zero():

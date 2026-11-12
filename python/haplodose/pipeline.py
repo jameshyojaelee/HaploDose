@@ -13,6 +13,7 @@ import hashlib
 import resource
 import sys
 import time
+import warnings
 from dataclasses import asdict
 from importlib import metadata
 from pathlib import Path
@@ -55,7 +56,8 @@ EMPTY_TABLE_COLUMNS = {
                  'uncertainty_estimand', 'uncertainty_statistic', 'uncertainty_center_field',
                  'uncertainty_status', 'posterior_effect_interval_validated',
                  'uncertainty_calibrated', 'uncertainty_scale_z', 'scaled_se_rna_log_ratio_approx', 'resolved'],
-    'profiles': ['specimen', 'clone', 'bin', 'log_ratio', 'log_ratio_gene', 'log_dose', 'assignment_dose', 'cn_state'],
+    'profiles': ['specimen', 'clone', 'bin', 'log_ratio', 'log_ratio_gene', 'log_dose', 'assignment_dose', 'cn_state',
+                 'pooled_count', 'expected_count', 'log_ratio_centre', 'count_units'],
     'differences': ['specimen', 'clone_a', 'clone_b', 'chromosome', 'start', 'end', 'n_genes', 'first_bin',
                     'last_bin', 'n_bins', 'direction', 'mean_diff', 'z', 'posterior',
                     'min_bin_posterior', 'posterior_rule'],
@@ -84,6 +86,37 @@ def check_identities(meta, query):
     if len(mixed):
         raise ValueError(f'specimens spanning more than one patient or dataset: {list(mixed.index[:5])}; give '
                          'each patient/dataset its own specimen name')
+
+
+def _specimen_graph(meta, neighbours):
+    if neighbours <= 0:
+        return None, 'disabled'
+    coordinate_columns = {'x', 'y'}.intersection(meta.columns)
+    if not coordinate_columns:
+        return None, 'coordinates_not_provided'
+    if len(coordinate_columns) != 2:
+        return None, 'incomplete_coordinate_columns'
+    xy = meta[['x', 'y']].apply(pd.to_numeric, errors='coerce').to_numpy(np.float64)
+    if not np.isfinite(xy).all():
+        return None, 'nonfinite_coordinates'
+    ids = meta.cell_id.to_numpy()
+    if 'section' not in meta:
+        graph = neighbour_graph(xy, neighbours, cell_ids=ids)
+        return graph, 'specimen_graph' if graph is not None else 'insufficient_spots'
+    sections = meta.section.str.strip()
+    if sections.isna().any() or sections.str.lower().isin({'', 'na', 'nan', 'none', 'null'}).any():
+        return None, 'missing_section_ids'
+    groups = sections.groupby(sections, sort=True).indices.values()
+    blocks, order = [], []
+    for rows in groups:
+        graph = neighbour_graph(xy[rows], neighbours, cell_ids=ids[rows])
+        blocks.append(graph if graph is not None else sparse.csr_matrix((len(rows), len(rows)), dtype=np.float32))
+        order.extend(rows)
+    graph = sparse.block_diag(blocks, format='csr')
+    if not graph.nnz:
+        return None, 'insufficient_spots'
+    inverse = np.argsort(order)
+    return graph[inverse][:, inverse], 'section_graph'
 
 
 def run(counts, cells, positions, out, exclude_genes=None, bin_genes=10, min_gene_mean=0.02,
@@ -242,8 +275,10 @@ def _run_single(counts, cells, positions, out, exclude_genes=None, bin_genes=10,
     p_normal = np.full(len(meta), np.nan)
     margin = np.full(len(meta), np.nan)
     confirmation_status = np.where(confirmation, 'not_fitted', 'not_requested').astype(object)
+    confirmation_unresolved_reason = np.where(confirmation, 'not_fitted', '').astype(object)
     confirmation_records, confirmation_contrasts = [], []
-    programmes, depth_gamma = {}, {}
+    programmes, depth_gamma, spatial_graph_status = {}, {}, {}
+    pairwise_depth_diagnostics = {}
     post_store, tables = {}, {k: [] for k in ['clones', 'segments', 'profiles', 'differences', 'log', 'tree',
                                              'reference_check', 'specimens', 'allele_segments', 'arms']}
     allele_depth = np.zeros(len(meta))
@@ -297,18 +332,18 @@ def _run_single(counts, cells, positions, out, exclude_genes=None, bin_genes=10,
                 type_keys = type_keys + [f'{dataset}|in_sample_normal']
                 n_in_sample = len(cand)
                 in_sample_ref[crow] = True
-        graph = None
-        if {'x', 'y'} <= set(meta.columns) and params.spatial_neighbors > 0:
-            xy = meta[['x', 'y']].apply(pd.to_numeric, errors='coerce').to_numpy(np.float64)[rows]
-            if np.isfinite(xy).all():
-                graph = neighbour_graph(xy, params.spatial_neighbors)
+        graph, graph_status = _specimen_graph(meta.iloc[rows], params.spatial_neighbors)
+        spatial_graph_status[spec] = graph_status
+        if graph_status in {'incomplete_coordinate_columns', 'nonfinite_coordinates', 'missing_section_ids'}:
+            warnings.warn(f'Specimen {spec}: spatial smoothing skipped ({graph_status})', RuntimeWarning, stacklevel=2)
         res = fit_specimen(Rows(Y, rows, chunk), Lbin[rows], mu_spec, reset, phi, params, prog, spec_alleles,
                            graph, gene_loader(counts, used, rows), depth_gamma.get(dataset))
-        summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, clone,
-                  post_max, p_normal, margin, post_store,
-                  genes=(gene_loader(counts, used, rows),
-                         dict(counts=[ref_gene[k] for k in type_keys if k in ref_gene], gbin=used.bin.to_numpy(),
-                              n_bins=J, in_sample=cand if n_in_sample else None)))
+        pairwise_depth_diagnostics[spec] = summarise(
+            spec, rows, res, bins, reset, params, type_keys, tables, status, clone,
+            post_max, p_normal, margin, post_store,
+            genes=(gene_loader(counts, used, rows),
+                   dict(counts=[ref_gene[k] for k in type_keys if k in ref_gene], gbin=used.bin.to_numpy(),
+                        n_bins=J, in_sample=cand if n_in_sample else None)))
         tables['specimens'][-1]['in_sample_reference_cells'] = n_in_sample
         # Confirmation eligibility must not condition on held-out test-feature counts.
         # score_confirmation abstains when proposal counts cannot support assignment.
@@ -323,6 +358,7 @@ def _run_single(counts, cells, positions, out, exclude_genes=None, bin_genes=10,
             status[confirm_rows[eligible]] = 'confirmation_candidate'
             status[confirm_rows[~eligible]] = 'confirmation_unresolved'
             confirmation_status[confirm_rows] = np.where(eligible, 'proposal_scored', 'unusable_proposal_evidence')
+            confirmation_unresolved_reason[confirm_rows] = scored['unresolved_reason']
             confirmation_records.append(result)
             confirmation_contrasts.extend(dict(specimen=spec, **row) for row in scored['contrasts'])
         hold_rows = np.flatnonzero(hold & meta.dataset.eq(dataset).to_numpy() & (Lbin >= params.min_umi))
@@ -345,6 +381,7 @@ def _run_single(counts, cells, positions, out, exclude_genes=None, bin_genes=10,
                             allele_depth=allele_depth, allele_snps=allele_snps,
                             in_sample_reference=in_sample_ref,
                             status=status, clone=clone, confirmation_status=confirmation_status,
+                            confirmation_unresolved_reason=confirmation_unresolved_reason,
                             evidence_status=np.where(np.isin(status, ['assigned', 'confirmation_candidate']),
                                                      'candidate_RNA_group', 'unresolved'),
                             calibration_status='unvalidated',
@@ -389,7 +426,24 @@ def _run_single(counts, cells, positions, out, exclude_genes=None, bin_genes=10,
               n_type_mismatch_genes=len(mismatch), type_mismatch_policy='diagnostic_only',
               feature_selection='fit_reference_only', calibration_status='unvalidated',
               coordinate_system='zero-based-half-open', genome_build=genome_build,
-              legacy_fields={'malignant_call': 'exploratory reference-difference heuristic; not DNA-validated'},
+              spatial_graph_status=spatial_graph_status,
+              pairwise_depth_diagnostics=pairwise_depth_diagnostics,
+              profile_pool_contract=dict(
+                  pooled_count='Full-count responsibility-weighted observations per clone and bin',
+                  expected_count='Fitted reference/nuisance expectation before RNA-state effect',
+                  log_ratio_centre='Clone-specific subtraction in exported log_ratio',
+                  count_units='Input count units; weighted pools need not be integers',
+                  aggregation='Sum observed and expected pools before applying one half-count offset; '
+                              'a mean of clone log effects is a different estimand',
+                  uncertainty='Fitted responsibilities and nuisance estimates are conditional, uncalibrated'),
+              legacy_fields={
+                  'malignant_call': 'exploratory reference-difference heuristic; no tumour identity calibration',
+                  'clone_posterior': 'plug-in responsibility for a fitted RNA component',
+                  'p_normal': 'plug-in responsibility for the reference-like RNA component',
+                  'cn_state': 'conditional RNA smoothing state on a working dose grid',
+                  'n_eff': 'sum of component responsibilities; n_cells_map counts MAP assignments',
+                  'potts_lambda': 'strength of directed neighbourhood smoothing',
+              },
               note='Relative RNA dosage states and RNA-inferred clones; not absolute DNA copy number '
                    'or validated DNA clones.')
     write_json(qc, out / 'qc.json')
@@ -457,17 +511,19 @@ def confirm_specimen(spec, discovery_rows, confirmation_rows, meta, Y, res, diff
                    coordinate_system='zero-based-half-open', feature_roles='even_proposal_odd_test',
                    model_scope='proposal-normalized composite NB; discovery fits may use all discovery features')
     write_json(payload, artifact_path)
-    candidates, accum = [], [dict(counts=np.zeros((2, 2)), variance=np.zeros((2, 2)), n=np.zeros(2, int))
+    candidates, reasons, accum = [], [], [dict(counts=np.zeros((2, 2)), variance=np.zeros((2, 2)), n=np.zeros(2, int))
                             for _ in contrasts]
     for a in range(0, len(confirmation_rows), 4096):
         block = confirmation_rows[a:a + 4096]
         scored = score_confirmation(np.asarray(Y[block], np.float64), meta.cell_id.to_numpy()[block], frozen)
         candidates.append(scored['candidate'])
+        reasons.append(scored['unresolved_reason'])
         for total, row in zip(accum, scored['contrasts']):
             total['counts'] += row['test_counts']
             total['variance'] += row['test_variance']
             total['n'] += row['n_cells']
-    scored = dict(candidate=np.concatenate(candidates), evidence=scored['evidence'],
+    scored = dict(candidate=np.concatenate(candidates), unresolved_reason=np.concatenate(reasons),
+                  evidence=scored['evidence'],
                   contrasts=[contrast_diagnostic(c, t['counts'], t['variance'], t['n'].tolist())
                              for c, t in zip(contrasts, accum)])
     return dict(specimen=spec, n_discovery=len(discovery_rows), n_confirmation=len(confirmation_rows),
@@ -647,7 +703,9 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
         tables['profiles'].extend(dict(specimen=spec, clone=name, bin=j, log_ratio=float(r[j]),
                                        log_ratio_gene=float(rg[j]),
                                        log_dose=float(prof['dose'][k][j]), assignment_dose=float(assign[j]),
-                                       cn_state=int(prof['path'][k][j] + 1))
+                                       cn_state=int(prof['path'][k][j] + 1),
+                                       pooled_count=float(Yk[k][j]), expected_count=float(prof['E'][k][j]),
+                                       log_ratio_centre=float(prof['centre'][k]), count_units='input_count_units')
                                   for j in range(nb))
         overlap = np.nan if k == 0 or model.programmes is None else model.programmes.overlap(prof['dose'][k],
                                                                                              model.base)
@@ -666,10 +724,19 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
           if R[:, k].sum() >= params.min_cells and (mapc == k).sum() >= params.min_cells]
     dist = np.zeros((len(ok), len(ok)))
     pairs = [(i, j) for i in range(len(ok)) for j in range(i + 1, len(ok))]
+    pair_diagnostics = []
+    tree_status = 'insufficient_profiles'
     if pairs:
         A, B = [ok[i] for i, _ in pairs], [ok[j] for _, j in pairs]
-        diff = model.matched_differences(mapc, list(zip(A, B)))   # depth-matched pooling of MAP cells
-        for (i, j), d in zip(pairs, diff):
+        diff = model.matched_differences(mapc, list(zip(A, B)), report_depth_balance=True)
+        tree_status = 'reported'
+        for (i, j), d in zip(pairs, diff, strict=True):
+            pair_diagnostics.append(dict(clone_a=names[ok[i]], clone_b=names[ok[j]], testable=d['testable'],
+                                         untestable_reason=d.get('untestable_reason'),
+                                         weighted_log_depth_wasserstein=d['weighted_log_depth_wasserstein']))
+            if not d['testable']:
+                tree_status = 'untestable_pair'
+                continue
             genes = 0
             # Report only segments that pass the same gene and allele vetoes as merging and splitting
             # (vetoed segments are written to the log table by model.supported).
@@ -683,7 +750,8 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
                                                   chromosome=chrom[a], start=int(bins.start.iloc[a]),
                                                   end=int(bins.end.iloc[b]), n_genes=n, **s))
             dist[i, j] = dist[j, i] = genes
-    tables['tree'].extend(dict(specimen=spec, **r) for r in tree_table(dist, [names[k] for k in ok]))
+    if tree_status == 'reported':
+        tables['tree'].extend(dict(specimen=spec, **r) for r in tree_table(dist, [names[k] for k in ok]))
     tables['log'].extend(dict(specimen=spec, **e) for e in model.log)
     tables['specimens'].append(dict(specimen=spec, n_cells=len(rows), n_clones=len(names) - 1,
                                     normal_like_cells=int((mapc == 0).sum()), beta=model.beta, tau=model.tau,
@@ -694,6 +762,7 @@ def summarise(spec, rows, res, bins, reset, params, type_keys, tables, status, c
                                     allele_kappa=np.nan if al is None else al.kappa,
                                     spatial_graph=model.graph is not None, potts_lambda=model.lam,
                                     phase_switch_nu=np.nan if al is None else al.nu))
+    return dict(pairs=pair_diagnostics, tree_status=tree_status)
 
 
 def reference_check(spec, hold_rows, ref_key, types, cols, Y, Lbin, mu, phi, res, params, prog=None,

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from haplodose.bulk import run_bulk
+from haplodose.bulk import run_bulk, _read_bulk_counts
 
 CONTRACT = dict(counts_kind='raw', genome_build='hg38', coordinate_system='zero-based-half-open',
                 gene_namespace='custom')
@@ -17,7 +17,7 @@ def _write(tmp_path, n_normals=20, n_chrom=22, per=300):
     within = np.tile(np.arange(per), n_chrom)
     genes = [f'G{i:05d}' for i in range(len(chrom))]
     # Gene starts past every hg38 p-arm end (> 125 Mb) so each chromosome is one q arm.
-    pos = pd.DataFrame({'gene': genes, 'chromosome': chrom, 'start': 130_000_000 + within * 100_000,
+    pos = pd.DataFrame({'gene': genes, 'gene_symbol': genes, 'chromosome': chrom, 'start': 130_000_000 + within * 100_000,
                         'end': 130_000_000 + within * 100_000 + 50_000})
     base = rng.lognormal(3, 1.5, len(genes))
     cols, roles = {}, []
@@ -61,6 +61,21 @@ def test_bulk_recovers_arm_events(tmp_path, bin_stat):
     assert run_json['calibration_method'] == 'none'
     assert run_json['output_schema_version'] == 2
     assert 0.0 <= run_json['normal_arm_call_rate_in_sample'] < 0.05
+    units = 'median_derived_pseudocounts' if bin_stat == 'median' else 'input_count_units'
+    assert run_json['binned_count_units'] == units
+    segments = pd.read_csv(out / 'segments.tsv', sep='\t')
+    assert segments['count_units'].eq(units).all()
+    samples = pd.read_csv(out / 'samples.tsv', sep='\t').set_index('sample')
+    assert samples['binned_count_units'].eq(units).all()
+    assert samples['input_binned_count_units'].eq('input_count_units').all()
+    used = pd.read_csv(out / 'genes.tsv.gz', sep='\t')['gene']
+    counts = pd.read_csv(tmp_path / 'counts.tsv', sep='\t', index_col=0)
+    expected = counts.loc[used, samples.index].sum(axis=0)
+    np.testing.assert_array_equal(samples.input_binned_counts, expected)
+    if bin_stat == 'sum':
+        np.testing.assert_array_equal(samples.binned_counts, expected)
+    else:
+        assert not np.array_equal(samples.binned_counts, expected)
 
 
 def test_small_normal_panel_is_flagged(tmp_path):
@@ -70,3 +85,20 @@ def test_small_normal_panel_is_flagged(tmp_path):
     assert metadata['normal_panel_size'] == 3
     assert 'normal_panel_size_adequate' not in metadata
     assert metadata['calibration_status'] == 'unvalidated'
+
+
+@pytest.mark.parametrize('header', ['N0\tN0\tN1', 'N0\t\tN1', 'N0\t \tN1'])
+def test_bulk_count_headers_reject_ambiguous_identity(tmp_path, header):
+    path = tmp_path / 'counts.tsv'
+    path.write_text('gene\t' + header + '\nG0\t3\t7\t5\n')
+    with pytest.raises(ValueError, match='nonempty, unique sample IDs'):
+        _read_bulk_counts(path)
+
+
+@pytest.mark.parametrize('compressed', [False, True])
+def test_bulk_count_headers_preserve_distinct_literal_ids(tmp_path, compressed):
+    expected = pd.DataFrame([[3, 7, 5]], index=['G0'], columns=['N0', 'N0.1', '001'])
+    expected.index.name = 'gene'
+    path = tmp_path / ('counts.tsv.gz' if compressed else 'counts.tsv')
+    expected.to_csv(path, sep='\t')
+    pd.testing.assert_frame_equal(_read_bulk_counts(path), expected, check_exact=True)

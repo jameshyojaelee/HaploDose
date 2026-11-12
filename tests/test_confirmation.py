@@ -65,3 +65,38 @@ def test_zero_proposal_depth_abstains_even_with_test_signal():
     result = score_confirmation(np.array([[0, 0, 10000, 1]]), ['heldout'], artifact())
     assert result['candidate'].tolist() == [-1]
     assert not result['contrasts'][0]['testable']
+
+
+@pytest.mark.parametrize('permutation', [[0, 1, 2], [2, 1, 0], [1, 0, 2]])
+def test_identical_top_proposal_profiles_abstain_under_candidate_permutation(permutation):
+    # The test profiles disagree, but cannot supply proposal membership evidence.
+    rates = np.array([[.4, .1, .4, .1], [.4, .1, .1, .4], [.1, .4, .1, .4]])
+    frozen = FrozenDiscovery(log_rates=np.log(rates[permutation]), phi=np.full(4, .1),
+        proposal_mask=[True, True, False, False], test_mask=[False, False, True, True],
+        contrasts=(), discovery_cell_ids=('train',))
+    for test_counts in ([80, 20], [20, 80], [0, 0]):
+        result = score_confirmation([[80, 20, *test_counts]], ['heldout'], frozen)
+        assert result['candidate'].tolist() == [-1]
+        assert result['unresolved_reason'].tolist() == ['tied_candidate_scores']
+
+
+def test_symmetric_evidence_ties_do_not_enter_either_contrast_pool():
+    frozen = FrozenDiscovery(log_rates=np.log([[.4, .1, .4, .1], [.1, .4, .1, .4]]),
+        phi=np.full(4, .1), proposal_mask=[True, True, False, False],
+        test_mask=[False, False, True, True],
+        contrasts=(Contrast(0, 1, (2,), 1, 'region'),), discovery_cell_ids=('train',))
+    Y = [[80, 20, 8, 2], [20, 80, 2, 8], [10, 10, 10000, 1]]
+    result = score_confirmation(Y, ['a', 'b', 'tie'], frozen)
+    assert result['candidate'].tolist() == [0, 1, -1]
+    assert result['contrasts'][0]['n_cells'] == [1, 1]
+    assert result['contrasts'][0]['test_counts'] == [[8., 2.], [2., 8.]]
+    np.testing.assert_array_equal(result['proposal_log_scores'][2, 0], result['proposal_log_scores'][2, 1])
+
+
+def test_single_finite_candidate_is_not_a_tie():
+    frozen = FrozenDiscovery(log_rates=np.zeros((1, 4)), phi=np.ones(4),
+        proposal_mask=[True, True, False, False], test_mask=[False, False, True, True],
+        contrasts=(), discovery_cell_ids=('train',))
+    result = score_confirmation([[1, 1, 0, 0]], ['a'], frozen)
+    assert result['candidate'].tolist() == [0]
+    assert result['unresolved_reason'].tolist() == ['']

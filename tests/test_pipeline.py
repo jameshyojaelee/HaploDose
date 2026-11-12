@@ -25,6 +25,38 @@ def result(tmp_path_factory):
     return root, qc, cells
 
 
+def test_profile_pools_preserve_observed_counts_and_log_effect(result):
+    root, qc, cells = result
+    profiles = pd.read_csv(root/'out/profiles.tsv.gz', sep='\t', float_precision='round_trip')
+    clones = pd.read_csv(root/'out/clones.tsv', sep='\t', float_precision='round_trip')
+    counts = np.load(root/'out/bin_counts.npy', mmap_mode='r')
+    posterior = np.load(root/'out/posteriors.npy', mmap_mode='r')
+    assert {'pooled_count', 'expected_count', 'log_ratio_centre', 'count_units'} <= set(profiles)
+    assert profiles.count_units.eq('input_count_units').all()
+    assert (profiles[['pooled_count', 'expected_count']].to_numpy() >= 0).all()
+    assert qc['profile_pool_contract']['uncertainty'].endswith('conditional, uncalibrated')
+    u = np.finfo(float).eps
+    recovered = np.log((profiles.pooled_count+.5)/(profiles.expected_count+.5))-profiles.log_ratio_centre
+    bound = 16*u*(1+np.abs(recovered)+np.abs(profiles.log_ratio_centre))
+    assert (np.abs(recovered-profiles.log_ratio) <= bound).all()
+    for specimen, frame in profiles.groupby('specimen'):
+        rows = np.flatnonzero(cells.specimen.eq(specimen) & cells.status.eq('assigned'))
+        cs = clones.loc[clones.specimen.eq(specimen)].sort_values('column')
+        raw = np.asarray(posterior[rows, :len(cs)], dtype=np.float16)
+        # Every original double responsibility is enclosed by the midpoints of
+        # its adjacent float16 values; do not reconstruct it as the rounded value.
+        lo = np.maximum(0, (raw.astype(float)+np.nextafter(raw, np.float16(-np.inf)).astype(float))/2)
+        hi = np.minimum(1, (raw.astype(float)+np.nextafter(raw, np.float16(np.inf)).astype(float))/2)
+        Y = np.asarray(counts[rows], float)
+        for k, name in enumerate(cs.clone):
+            values = frame.loc[frame.clone.eq(name)].sort_values('bin').pooled_count.to_numpy()
+            low = lo[:, k]@Y; high = hi[:, k]@Y
+            operations = 2*len(rows)+2
+            gamma = operations*u/(1-operations*u)
+            padding = gamma*np.maximum(1, high)
+            assert (values >= low-padding).all() and (values <= high+padding).all()
+
+
 def test_recovers_clones_and_normals(result):
     root, qc, cells = result
     s1 = cells[cells.specimen.eq('S1')]
@@ -52,6 +84,34 @@ def test_subclonal_difference_reported(result):
     diff = pd.read_csv(root / 'out/differences.tsv', sep='\t')
     s1 = diff[diff.specimen.eq('S1') & ~diff.clone_a.str.endswith('_c0') & ~diff.clone_b.str.endswith('_c0')]
     assert set(s1.chromosome) == {'chr12'}
+
+
+def test_untestable_pair_withholds_similarity_tree(result, monkeypatch):
+    from haplodose.clones import SpecimenModel
+
+    root, baseline_qc, _ = result
+    assert baseline_qc['pairwise_depth_diagnostics']['S1']['tree_status'] == 'reported'
+    original = SpecimenModel.matched_differences
+
+    def mark_one_export_pair_untestable(model, labels, pairs, **kwargs):
+        comparisons = original(model, labels, pairs, **kwargs)
+        if kwargs.get('report_depth_balance'):
+            comparisons[0].update(testable=False, segments=[], distance=float('inf'),
+                                  untestable_reason='no_shared_depth_stratum_mass',
+                                  weighted_log_depth_wasserstein=None)
+        return comparisons
+
+    monkeypatch.setattr(SpecimenModel, 'matched_differences', mark_one_export_pair_untestable)
+    data = root / 'data'
+    out = root / 'untestable_pair'
+    qc = run(data / 'counts.h5', data / 'cells.tsv', data / 'positions.tsv', out,
+             exclude_genes=root / 'mask.txt', chunk=97, **INPUT_CONTRACT)
+    diagnostics = qc['pairwise_depth_diagnostics']['S1']
+    assert diagnostics['tree_status'] == 'untestable_pair'
+    assert diagnostics['pairs'][0]['untestable_reason'] == 'no_shared_depth_stratum_mass'
+    assert any(pair['testable'] for pair in diagnostics['pairs'])
+    assert 'S1' not in pd.read_csv(out / 'tree.tsv', sep='\t').specimen.to_list()
+    np.testing.assert_array_equal(np.load(out / 'posteriors.npy'), np.load(root / 'out/posteriors.npy'))
 
 
 def test_masked_gene_and_outputs(result):

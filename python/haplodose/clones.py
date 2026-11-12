@@ -77,7 +77,7 @@ from .kernels.estep import cell_loglik, posteriors, programme_scores
 from .profile import (ProfileParams, _subset_reset, difference_segments, fit_pooled,
                       group_centres, group_tau, log_ratio, runs, segment, segments_table,
                       weighted_median, pooled_lograte)
-from .alleles import state_b
+from .alleles import balance_loglik_ratio, state_b
 from .programmes import fit_amplitudes
 
 
@@ -169,6 +169,8 @@ def region_effect_covariance(Y, m, phi, region):
 def thin_counts(Y, keys, size, seed, eps=THIN_EPS):
     """Proposal half of NB count splitting: Y_prop | Y ~ BetaBinomial(Y, eps size_j, (1 - eps) size_j).
 
+    Independence of the two parts requires the NB law with its true fixed size.
+    Heterogeneous gene sums or plug-in size estimates may violate that condition.
     Y [n, J] counts; keys [n] global row indices. Each row is drawn from its own Philox stream keyed by
     (seed, key), so a row's draw does not depend on chunking or on which other rows are requested.
     Returns float32 [n, J]; the test half is Y - Y_prop."""
@@ -619,10 +621,13 @@ def leiden_groups(F, params: CloneParams):
     if n < 2 * params.min_cells:
         return np.zeros(n, dtype=int)
     X = PCA(n_components=int(min(params.n_pcs, n - 1, F.shape[1] - 1)), svd_solver='randomized',
-            random_state=params.seed).fit_transform(F)
+            random_state=params.seed).fit_transform(np.asarray(F, np.float64))
     k = int(min(params.n_neighbors, n - 1))
     _, idx = NearestNeighbors(n_neighbors=k + 1).fit(X).kneighbors(X)
-    edges = np.column_stack([np.repeat(np.arange(n), k), idx[:, 1:].ravel()])
+    # Duplicate feature vectors need not return the query itself first. Remove
+    # self by row identity so every vertex retains k nonself neighbours.
+    idx = np.array([neighbours[neighbours != i][:k] for i, neighbours in enumerate(idx)])
+    edges = np.column_stack([np.repeat(np.arange(n), k), idx.ravel()])
     g = ig.Graph(n=n, edges=edges, directed=False).simplify()
     ig.set_random_number_generator(random.Random(params.seed))
     part = g.community_leiden(objective_function='modularity', resolution=params.leiden_resolution, n_iterations=2)
@@ -756,7 +761,7 @@ class SpecimenModel:
         self.genes = None               # (subsample rows, gene counts CSR [sub, genes], gene bin) for gene checks
         self.R_prev = None              # mean-field state carried between E-steps (spatial only)
 
-    # Spatial Potts prior (mean-field) ------------------------------------------
+    # Directed spatial neighbourhood smoothing --------------------------------
     def posterior(self, LL, pi, iters=10):
         logpi = np.log(pi)
         R = posteriors(LL, logpi)
@@ -768,7 +773,7 @@ class SpecimenModel:
             self.R_prev = R
             return R
         if self.R_prev is not None and self.R_prev.shape == R.shape:
-            R = self.R_prev               # variational EM: continue from the previous labels
+            R = self.R_prev               # Warm start the finite smoothing iterations.
         for _ in range(iters):
             R = posteriors(LL + self.lam * np.asarray(self.graph @ R, np.float32), logpi)
         self.R_prev = R
@@ -778,8 +783,8 @@ class SpecimenModel:
         """lambda maximizing how well neighbours predict each cell's own data.
 
         score = sum_c log sum_k softmax(log pi + lambda (G R0)_c)_k exp(LL_ck), with R0
-        the data-only posteriors: the cell's own labels never enter its prior, so
-        spatially random clones give lambda = 0."""
+        the data-only responsibilities. The graph excludes self-edges. The
+        selected strength is a predictive heuristic and can be positive by chance."""
         GR = np.asarray(self.graph @ R0)
         ll = LL - LL.max(axis=1, keepdims=True)
         best, lam = -np.inf, 0.0
@@ -950,18 +955,20 @@ class SpecimenModel:
                                    shift=shift, count_variance=count_variance, weight_scale=weight_scale)
 
     def matched_differences(self, labels, pairs, n_strata=8, *, cell_weights=None,
-                            min_effective_cells=None):
+                            min_effective_cells=None, report_depth_balance=False):
         """Differences between groups of cells with depth-matched pooling.
 
         labels [n]: group per cell (-1: none). For each pair, cells are weighted so
-        both groups have the same distribution over log-depth strata (coarsened
-        exact matching); depth-driven composition then cancels in the difference,
-        whatever its functional form. Groups without depth overlap have no power.
+        both groups have the same weight mass in each shared log-depth stratum.
+        Depth and RNA composition can still differ within a stratum. A comparison
+        without shared stratum mass is untestable.
 
         Optional nonnegative cell_weights are matched by weight mass, not cell
         count. Squared weights determine the conditional sampling term. These
         calculations condition on the supplied weights; fitted membership weights
         do not acquire an independent-confirmation or calibration claim.
+        With report_depth_balance, return the weighted empirical Wasserstein
+        distance of the matched log depths for each pair, in natural-log units.
         """
         if cell_weights is not None:
             cell_weights = np.asarray(cell_weights, np.float64)
@@ -996,6 +1003,17 @@ class SpecimenModel:
                       out=np.zeros_like(total_weight), where=total_weight > 0)
         result = self.differences(Y[0::2], L[0::2], XL[0::2], Y[1::2], L[1::2], XL[1::2],
                                   count_variance=(Q[0::2], Q[1::2]), weight_scale=(c[0::2], c[1::2]))
+        if report_depth_balance:
+            from scipy.stats import wasserstein_distance
+
+            for i, r in enumerate(result):
+                ia, ib = r_idx[2 * i:2 * i + 2]
+                wa, wb = val[2 * i:2 * i + 2]
+                shared = bool(np.all(total_weight[2 * i:2 * i + 2] > 0))
+                r['weighted_log_depth_wasserstein'] = (
+                    float(wasserstein_distance(self.x[ia], self.x[ib], wa, wb)) if shared else None)
+                if not r['testable']:
+                    r['untestable_reason'] = 'unusable_test_contrast' if shared else 'no_shared_depth_stratum_mass'
         if min_effective_cells is not None:
             Wc = W.tocsc()
             effective = []
@@ -1018,10 +1036,14 @@ class SpecimenModel:
         keep = []
         for s in segments:
             where = f"bins{s['first_bin']}-{s['last_bin']}"
-            if labels is not None and not self.gene_consistent(s, labels, a, b):
-                if log:
-                    self.log.append(dict(action='gene_veto', context=where))
-                continue
+            if labels is not None:
+                gene_support = self.gene_consistent(s, labels, a, b)
+                if gene_support is False:
+                    if log:
+                        self.log.append(dict(action='gene_veto', context=where))
+                    continue
+                if gene_support is None and self.genes is not None and log:
+                    self.log.append(dict(action='gene_veto_uninformative', context=where))
             if (self.alleles is not None and getattr(self.alleles, 'bins', None) is not None and Aa is not None
                     and self.alleles.veto(self.alleles.snps_in(self.alleles.bins, s['first_bin'], s['last_bin']),
                                           Aa, Da, Ab, Db, log_dose=s['mean_diff'] / self.beta)):
@@ -1032,30 +1054,35 @@ class SpecimenModel:
         return keep
 
     def gene_consistent(self, seg, labels, a, b, min_genes=8, alpha=0.01):
-        """Do most genes of a difference segment move with it? (one-sided sign test, test bins only)
+        """Return concordance, veto, or None when the gene contrast is unavailable.
 
-        Copy number shifts every gene of a segment; cell-state programmes or a few highly
-        expressed genes (e.g. ribosomal clusters) shift a minority. Genes are pooled over
-        the proposal subsample; log ratios are centred by the genome-wide median. In split_mode 'thin' every bin
-        is a test bin and the gene counts are the test half (`thin_gene_counts`)."""
+        This heuristic uses unweighted hard assignments on a proposal subsample,
+        which can differ from the depth-matched population. The selected interval
+        and correlated gene signs limit the nominal sign test. Coordinated cell
+        state and variable dosage response both affect concordance. In thinning
+        mode the gene counts come from the test half (`thin_gene_counts`).
+        """
         if self.genes is None:
-            return True
+            return None
         sub, Xg, gbin = self.genes
         la = labels[sub]
         ia, ib = la == a, la == b
         if ia.sum() < 10 or ib.sum() < 10:
-            return True
+            return None
         ya, yb = np.asarray(Xg[ia].sum(axis=0)).ravel(), np.asarray(Xg[ib].sum(axis=0)).ravel()
-        r = np.log((ya + 0.5) / ya.sum()) - np.log((yb + 0.5) / yb.sum())
+        total_a, total_b = ya.sum(), yb.sum()
+        if total_a == 0 or total_b == 0:
+            return None
+        r = np.log((ya + 0.5) / total_a) - np.log((yb + 0.5) / total_b)
         informative = (ya + yb) >= 10
         if informative.sum() < min_genes:
-            return True
+            return None
         r = r - np.median(r[informative])
         sel = (informative & (gbin >= seg['first_bin']) & (gbin <= seg['last_bin'])
                & self.test_mask[np.clip(gbin, 0, self.J - 1)])
         n = int(sel.sum())
         if n < min_genes:
-            return True
+            return None
         k = int((np.sign(r[sel]) == (1 if seg['direction'] == 'higher' else -1)).sum())
         from scipy.stats import binom
         return bool(binom.sf(k - 1, n, 0.5) < alpha)
@@ -1063,6 +1090,32 @@ class SpecimenModel:
     def merge_unsupported(self, R, doses, pi):
         """Merge tumour clones with no depth-matched dosage difference and no allele difference."""
         merged = False
+        statistical_merge = False
+        # Exact duplicate RNA profiles have identical expression likelihoods. Hard MAP
+        # assignments can hide all but one of them from the pairwise tests below.
+        # Preserve the normal component and any allele or spatial distinctions.
+        if self.alleles is None and self.graph is None:
+            keep = [0]
+            duplicate = []
+            for k in range(1, len(doses)):
+                target = next((i for i in range(1, len(keep))
+                               if np.all(np.isfinite(doses[k]))
+                               and np.array_equal(doses[k], doses[keep[i]])), None)
+                if target is None:
+                    keep.append(k)
+                else:
+                    duplicate.append((k, target))
+            if duplicate:
+                original_R, original_pi = R, pi
+                R, pi = R[:, keep], pi[keep]
+                for k, target in duplicate:
+                    R[:, target] += original_R[:, k]
+                    pi[target] += original_pi[k]
+                    self.log.append(dict(action='merge_identical_profiles', a=keep[target], b=k,
+                                         criterion_scope='exact_expression_profile',
+                                         interpretation='RNA_indistinguishable_not_genomic_equivalence'))
+                doses = [doses[k] for k in keep]
+                merged = True
         while len(doses) > 2:
             assignment_R = R
             labels = R.argmax(axis=1)
@@ -1116,7 +1169,8 @@ class SpecimenModel:
                 self.set_allele_pools(self.Ak[keep], self.Dk[keep])
             doses = [doses[k] for k in keep]
             merged = True
-        if merged:
+            statistical_merge = True
+        if statistical_merge:
             Yk, Lk, XLk = self.pooled(R)
             prof = self.profiles(Yk, Lk, XLk)
             doses = [np.zeros(self.J)] + [prof['dose'][k] for k in range(1, len(doses))]
@@ -1210,11 +1264,16 @@ class SpecimenModel:
     def em(self, doses, pi, *, stop_on_map=True):
         """Budgeted profile/nuisance refinement; clone 0 keeps dose 0.
 
+        NB assignments, pooled PLN segmentation and residual nuisance updates
+        are separate working steps with no established common objective.
         Stable MAP labels do not certify convergence of responsibilities or
         profiles. The historical MAP-stability shortcut is a heuristic, not a
         convergence certificate. ``stop_on_map=False`` runs the configured budget
         for controlled diagnostics. Returns doses, pi, responsibilities, loglik,
-        profiles; neither stopping rule certifies convergence.
+        profiles; neither stopping rule certifies convergence. Final scores
+        use the last refinement-time allele fit. Its parameters and fit pools
+        remain frozen during final scoring, rather than refitting after LL/R
+        have been calculated. Final responsibilities need not be a fixed point.
         """
         p = self.params
         prev = None
@@ -1263,9 +1322,30 @@ class SpecimenModel:
             prev = None if changed else mapc
         LL = self.loglik(doses)
         R = self.posterior(LL, pi)
+        # The last profile/nuisance update can move a component below the same
+        # support minimum checked inside refinement. Enforce it on the actual
+        # returned state too, retaining clone0 and the fitted parameter snapshot.
+        # Removing columns and renormalising is not another refinement round or
+        # a convergence claim. Spatial re-scoring can change support again;
+        # strictly decreasing component count bounds these checks.
+        for _ in range(len(doses)):
+            mass = R.sum(axis=0)
+            keep = [0] + [k for k in range(1, len(doses)) if mass[k] >= p.min_cells]
+            if len(keep) == len(doses):
+                break
+            for k in range(1, len(doses)):
+                if mass[k] < p.min_cells:
+                    self.log.append(dict(action='drop_small_final', clone=k, n_eff=float(mass[k]),
+                                         minimum=p.min_cells))
+            if self.R_prev is not None:
+                self.R_prev = self._renormalise(self.R_prev, LL, pi, keep)
+            self._keep_alleles(keep)
+            doses, pi = [doses[k] for k in keep], pi[keep] / pi[keep].sum()
+            LL = LL[:, keep]
+            R = self.posterior(LL, pi)
+        else:
+            raise RuntimeError('Final component support checks did not terminate')
         Yk, Lk, XLk = self.pooled(R)
-        if self.alleles is not None:
-            self.set_allele_pools(*self.alleles.pool(R))
         self.log.append(dict(action='em', n_eff=' '.join(f'{x:.0f}' for x in R.sum(axis=0)), potts_lambda=self.lam,
                              refinement_rounds=completed_rounds, convergence_status='not_certified_' + termination))
         return doses, pi, R, LL, Yk, Lk, XLk
@@ -1291,12 +1371,19 @@ class SpecimenModel:
         return out
 
     def _update_offset(self, R, doses, keep):
-        Rk = R[:, keep]
-        N = Rk.T.astype(np.float64) @ self.L
+        """Legacy clone-only pooled RNA residual for the kept latent population.
+
+        Observed and expected pools must represent the same retained responsibilities. This heuristic
+        excludes depth/programme terms; it is not a conditional-cell-mean residual or an exact NB
+        likelihood maximization. Changing that mean alone fails the current recovery contract.
+        """
+        Rk = np.asarray(R[:, keep], np.float64)
+        N = Rk.T @ self.L
         lr = np.log(self.base)[None] + np.asarray(doses)
         rates = np.exp(lr - logsumexp(lr, axis=1, keepdims=True))
         expected = (N[:, None] * rates).sum(axis=0)
-        o = np.log((self.Ytot + 0.5) / (expected + 0.5))
+        observed = self.rows.weighted_sum(Rk.sum(axis=1)[:, None])[0]
+        o = np.log((observed + 0.5) / (expected + 0.5))
         self.offset = o - np.median(o)
 
     def _update_phi(self, R, doses):
@@ -1367,7 +1454,7 @@ class SpecimenModel:
             b = self.allele_post[k][idx] @ state_b()
             b = 0.5 + self.alleles.params.cell_shrink * (b - 0.5)
             A, D = A_all[:, idx], D_all[:, idx]
-            llr = np.asarray(A @ np.log(b / 0.5) + (D - A) @ np.log((1 - b) / 0.5)).ravel()
+            llr = balance_loglik_ratio(A, D, b, self.alleles.params.cell_kappa)
             g = (llr > 0).astype(int)
             if min(g.sum(), len(g) - g.sum()) >= self.params.min_cells:
                 out.append((g, f"alleles_{r['chromosome']}:{r['start']}-{r['end']}"))
@@ -1661,6 +1748,27 @@ def _name(members, labels):
     return '+'.join(str(m if labels is None else labels[m]) for m in members)
 
 
+def _finalize_search(model, doses, pi):
+    """Validate a budget-exhausted search without accepting another split.
+
+    A last-cycle split needs the same merge check as an earlier split. Refitting
+    after a merge can change the other groups' support, so check again. Strictly
+    decreasing group counts bound this finalization even when search oscillates.
+    """
+    for iteration in range(len(doses)):
+        fitted = model.em(doses, pi)
+        if len(fitted[0]) > len(doses):
+            raise RuntimeError('Terminal EM must not add groups')
+        doses, pi, merged = model.merge_unsupported(fitted[2], fitted[0], fitted[1])
+        if not merged:
+            model.log.append(dict(action='search_stop', reason='cycle_budget_exhausted',
+                                  terminal_merge_checked=True, terminal_merge_rounds=iteration))
+            return fitted
+        if len(doses) >= len(fitted[0]):
+            raise RuntimeError('Terminal merge must reduce the number of groups')
+    raise RuntimeError('Terminal merge validation did not terminate')
+
+
 def fit_specimen(rows: Rows, L, mu, reset, phi, params: CloneParams, programmes=None, alleles=None, graph=None,
                  gene_loader=None, gamma=None):
     """Fit one specimen. Returns a dict of arrays and tables (bin indices, not coordinates).
@@ -1739,6 +1847,7 @@ def fit_specimen(rows: Rows, L, mu, reset, phi, params: CloneParams, programmes=
         model.set_allele_pools(np.array(pools[0]), np.array(pools[1]))
     pi = np.array([max(normal_share, params.normal_prior)] + shares)
     pi /= pi.sum()
+    budget_exhausted = False
     for cycle in range(params.cycles):
         doses, pi, R, LL, Yk, Lk, XLk = model.em(doses, pi)
         # Merge tumour clones without depth-matched dosage or allele differences.
@@ -1749,21 +1858,27 @@ def fit_specimen(rows: Rows, L, mu, reset, phi, params: CloneParams, programmes=
         if not split:
             break
     else:
-        doses, pi, R, LL, Yk, Lk, XLk = model.em(doses, pi)
+        budget_exhausted = True
+        doses, pi, R, LL, Yk, Lk, XLk = _finalize_search(model, doses, pi)
     prof = model.profiles(Yk, Lk, XLk)
     evidence = dict(group_interpretation='RNA_inferred_candidate',
                     confirmation_status='not_independent', specimen_error_control=False,
                     split_filter='selected_parent_expression_search' if params.split_null_draws else 'disabled',
                     initial_groups_pooled=bool(params.split_null_draws and params.split_null_initial),
+                    search_termination='cycle_budget_exhausted' if budget_exhausted else 'no_accepted_split',
+                    terminal_merge_checked=True,
                     query_derived_reference_opt_in=params.in_sample_reference)
     return dict(model=model, doses=np.asarray(doses), pi=pi, R=R, LL=LL, Yk=Yk, Lk=Lk, XLk=XLk, prof=prof,
                 evidence=evidence)
 
 
-def neighbour_graph(xy, k):
+def neighbour_graph(xy, k, *, cell_ids=None):
     """Row-normalized k-nearest-neighbour graph over one specimen's coordinates, self always excluded.
 
-    Neighbours are ordered by (distance, index), and the cell itself is removed by index rather than by
+    With explicit cell_ids, search uses canonical ID order and restores the input
+    order afterward, so arbitrary distance ties do not depend on row permutation.
+    Ties have no biological preference. Calls without IDs retain legacy row-order
+    tie handling. Within returned candidates neighbours are ordered by (distance, index), and the cell itself is removed by index rather than by
     position: at duplicated coordinates the first neighbour returned need not be the cell (review 2026-11-02 #7:
     60 cells on 20 triplicated points gave 20 self-edges and lambda 1.0 for random labels). The graph is
     directed and row-normalized, so G @ R is a neighbourhood-average smoothing heuristic, not the mean-field
@@ -1771,15 +1886,28 @@ def neighbour_graph(xy, k):
     from scipy import sparse
     from sklearn.neighbors import NearestNeighbors
     n = len(xy)
+    order = None
+    if cell_ids is not None:
+        ids = np.asarray(cell_ids, dtype=object)
+        if (ids.ndim != 1 or len(ids) != n
+                or any(not isinstance(value, str) or not value.strip() for value in ids)
+                or len(set(ids)) != n):
+            raise ValueError('spatial cell IDs must be aligned, unique, nonempty strings')
+        order = np.argsort(ids, kind='stable')
+        xy = np.asarray(xy)[order]
     k = int(min(k, n - 1))
     if k < 1:
         return None
     dist, idx = NearestNeighbors(n_neighbors=k + 1).fit(xy).kneighbors(xy)
     dist = np.where(idx == np.arange(n)[:, None], np.inf, dist)
-    order = np.lexsort((idx, dist), axis=-1)[:, :k]
-    cols = np.take_along_axis(idx, order, axis=1).ravel()
+    nearest = np.lexsort((idx, dist), axis=-1)[:, :k]
+    cols = np.take_along_axis(idx, nearest, axis=1).ravel()
     rows = np.repeat(np.arange(n), k)
-    return sparse.csr_matrix((np.full(len(cols), 1.0 / k, np.float32), (rows, cols)), shape=(n, n))
+    graph = sparse.csr_matrix((np.full(len(cols), 1.0 / k, np.float32), (rows, cols)), shape=(n, n))
+    if order is not None:
+        inverse = np.argsort(order)
+        graph = graph[inverse][:, inverse]
+    return graph
 
 
 def clone_order(R):

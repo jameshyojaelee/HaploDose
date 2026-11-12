@@ -14,7 +14,7 @@ def main(argv=None):
     r = sub.add_parser('run', help='infer relative RNA profiles and candidate CNA groups')
     r.add_argument('--counts', required=True, help='10x H5, h5ad (CSR X) or CSR H5')
     r.add_argument('--cells', required=True, help='TSV in matrix order: cell_id, specimen, patient, role, ref_group, ref_split')
-    r.add_argument('--positions', required=True, help='TSV: gene, chromosome, start, end')
+    r.add_argument('--positions', required=True, help='TSV: gene, chromosome, start, end; non-symbol ribosomal filtering requires gene_symbol')
     r.add_argument('--out', required=True, help='new or empty output directory')
     r.add_argument('--exclude-genes', help='one gene name per line, never used as features')
     r.add_argument('--alleles', help='Numbat-style phased allele table (cell, CHROM, POS, cM, AD, DP, GT, gene)')
@@ -64,7 +64,7 @@ def main(argv=None):
     b = sub.add_parser('bulk', help='relative RNA profile per bulk sample against normal samples')
     b.add_argument('--counts', required=True, help='TSV genes x samples, first column gene name')
     b.add_argument('--samples', required=True, help='TSV: sample, role (tumour | normal)')
-    b.add_argument('--positions', required=True, help='TSV: gene, chromosome, start, end')
+    b.add_argument('--positions', required=True, help='TSV: gene, chromosome, start, end; non-symbol ribosomal filtering requires gene_symbol')
     b.add_argument('--out', required=True, help='new or empty output directory')
     b.add_argument('--exclude-genes', help='one gene name per line, never used as features')
     b.add_argument('--bin-genes', type=int, default=10)
@@ -74,6 +74,8 @@ def main(argv=None):
     b.add_argument('--programmes', type=int, default=10, help='normal-sample expression programmes (0: off)')
     b.add_argument('--bin-stat', choices=['sum', 'median'], default='sum',
                    help='bin value: pooled counts, or median of per-gene log ratios to the normals')
+    b.add_argument('--rna-profile-smoothing', choices=['none', 'predictive', 'native-regions', 'posterior-regions'], default='none',
+                   help='optional descriptive RNA profile: predictive smoothing, native regions or boundary averaging (region modes require sum)')
     for parser in (r, b):
         parser.add_argument('--counts-kind', choices=['raw'], required=True,
                             help='explicit raw-count declaration; normalized/estimated values are unsupported')
@@ -100,7 +102,8 @@ def main(argv=None):
                        bin_genes=a.bin_genes, min_cpm=a.min_cpm, n_programmes=a.programmes,
                        bin_stat=a.bin_stat, device=a.device, counts_kind=a.counts_kind,
                        genome_build=a.genome_build, coordinate_system=a.coordinate_system,
-                       gene_namespace=a.gene_namespace, centromeres=a.centromeres, max_gap_bp=a.max_gap_bp))
+                       gene_namespace=a.gene_namespace, centromeres=a.centromeres, max_gap_bp=a.max_gap_bp,
+                       rna_profile_smoothing=a.rna_profile_smoothing))
         return
     from .pipeline import run
     params = CloneParams(min_cells=a.min_cells, min_umi=a.min_umi, leiden_resolution=a.leiden_resolution,

@@ -1,5 +1,6 @@
 """Actual pipeline isolation across confirmation cells and independent datasets."""
 import json
+from types import SimpleNamespace
 
 import h5py
 import numpy as np
@@ -8,7 +9,7 @@ import pytest
 from scipy import sparse
 
 from haplodose.clones import CloneParams
-from haplodose.pipeline import run
+from haplodose.pipeline import confirm_specimen, run
 from haplodose.simulate import write_dataset
 
 
@@ -67,6 +68,12 @@ def test_confirmation_changes_do_not_change_discovery_fit(split_run):
     assert manifests[0]['specimens'][0]['artifact']['sha256'] == manifests[1]['specimens'][0]['artifact']['sha256']
     assert a.loc[a.analysis_split.eq('confirmation'), 'clone_posterior'].isna().all()
     assert not a.loc[a.analysis_split.eq('confirmation'), 'malignant_call'].any()
+    confirmation = a.analysis_split.eq('confirmation')
+    assert a.loc[~confirmation, 'confirmation_unresolved_reason'].isna().all()
+    assigned = confirmation & a.status.eq('confirmation_candidate')
+    assert a.loc[assigned, 'confirmation_unresolved_reason'].isna().all()
+    unresolved = confirmation & a.status.eq('confirmation_unresolved')
+    assert a.loc[unresolved, 'confirmation_unresolved_reason'].notna().all()
 
 
 def test_unrelated_dataset_does_not_change_discovery_or_confirmation_artifact(split_run):
@@ -99,3 +106,24 @@ def test_fraction_and_explicit_metadata_are_not_silently_combined(split_run):
     with pytest.raises(ValueError, match='not both'):
         run(data / 'counts.h5', root / 'cells.tsv', data / 'positions.tsv', root / 'invalid',
             params=params, discovery_fraction=.5, **CONTRACT)
+
+
+def test_confirmation_reasons_survive_chunk_boundaries(tmp_path):
+    # A frozen fit isolates the export path without fitting to confirmation data.
+    rates = np.log([[.4, .4, .1, .1], [.1, .1, .4, .4]])
+    model = SimpleNamespace(phi=np.full(4, .1), gamma=np.zeros(4), programmes=None,
+                            log_rates=lambda doses: rates)
+    res = dict(model=model, R=np.array([[.9, .1], [.1, .9]]), pi=np.array([.5, .5]), doses=None)
+    Y = np.tile([80, 8, 20, 2], (4099, 1))
+    Y[3::2] = [10, 100, 10, 1]
+    Y[-1] = [0, 1000, 0, 1]
+    meta = pd.DataFrame(dict(cell_id=[f'c{i}' for i in range(len(Y))]))
+    (tmp_path/'bins.tsv').write_text('bin\n0\n1\n2\n3\n')
+    result = confirm_specimen('A', np.array([0, 1]), np.arange(2, len(Y)),
+                              meta, Y, res, [], tmp_path)
+    scored = result['scored']
+    expected = np.full(4097, '', dtype=object)
+    expected[1::2] = 'tied_candidate_scores'
+    expected[-1] = 'no_proposal_depth'
+    np.testing.assert_array_equal(scored['unresolved_reason'], expected)
+    np.testing.assert_array_equal(scored['candidate'], np.where(expected == '', 0, -1))

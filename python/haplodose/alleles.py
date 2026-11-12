@@ -11,8 +11,9 @@ states are balanced (b = 0.5) or imbalanced at level theta_l in either
 orientation (b = 0.5 +- theta_l). Orientation flips between neighbouring SNPs with
 the phase-switch probability (1 - exp(-2 nu d)) / 2, d in cM (Numbat's form;
 nu is chosen by likelihood on the tumour pools). Emissions are beta-binomial
-with concentration kappa estimated from same-patient reference cells, so
-allele-specific expression noise is not read as copy-number imbalance.
+with concentration kappa estimated from same-patient reference cells. This
+represents reference overdispersion; context-specific allele expression remains
+an alternative to genomic imbalance.
 
 SNPs are dropped when same-patient reference cells show clear imbalance at them
 (imprinting, strong eQTL, mapping bias), when their gene or site is excluded, or
@@ -326,6 +327,11 @@ def cell_loglik(A, D, B, shrink=0.9, kappa=None):
     independently: pooled-clone overdispersion is not a validated cell-level concentration. None uses the
     legacy binomial model. Neither option integrates uncertainty in estimated clone fractions.
     """
+    return _cell_loglik(A, D, B, shrink, kappa, np.float32)
+
+
+def _cell_loglik(A, D, B, shrink, kappa, dtype):
+    """Shared observation model; selection contrasts retain float64 precision."""
     B = 0.5 + shrink * (np.asarray(B, np.float64) - 0.5)
     if not np.isfinite(B).all() or ((B <= 0) | (B >= 1)).any():
         raise ValueError('shrunken allele fractions must be finite and strictly between 0 and 1')
@@ -352,9 +358,22 @@ def cell_loglik(A, D, B, shrink=0.9, kappa=None):
             alpha, beta = kappa * B[:, idx], kappa * (1 - B[:, idx])
             out[c] = (betaln(a[None] + alpha, depth[None] - a[None] + beta)
                       - betaln(alpha, beta)).sum(axis=1)
-        return out.astype(np.float32)
+        return out.astype(dtype)
     la, lb = np.log(B).T, np.log1p(-B).T
-    return np.asarray(A @ la + (D - A) @ lb, np.float32)
+    return np.asarray(A @ la + (D - A) @ lb, dtype)
+
+
+def balance_loglik_ratio(A, D, b, kappa=None):
+    """Per-cell log likelihood of already-shrunken fractions b versus balance.
+
+    Uses the explicitly supplied cell-level observation model. Pooled-clone
+    concentration is a different quantity and must not be substituted here.
+    """
+    if kappa is None:
+        # Preserve the legacy float64 contrast, including its evaluation order.
+        return np.asarray(A @ np.log(b / 0.5) + (D - A) @ np.log((1 - b) / 0.5)).ravel()
+    likelihood = _cell_loglik(A, D, np.stack((b, np.full_like(b, .5))), 1., kappa, np.float64)
+    return likelihood[:, 0] - likelihood[:, 1]
 
 
 def segment_alleles(post, snps, Dk, bins, first_bin, last_bin, levels=LEVELS):
@@ -513,7 +532,9 @@ def balanced_cells(alleles: SpecimenAlleles, min_theta=0.15, posterior=0.99):
     The pooled specimen is fitted once; runs with theta >= min_theta (LOH, single-copy
     gains/losses) orient each SNP. A cell's log-likelihood ratio of that oriented
     imbalance against b = 0.5 gives P(balanced) with a flat prior; cells at or above
-    `posterior` are allele-balanced candidates. Balanced gains and genome doubling
+    `posterior` are allele-balanced candidates. The explicitly selected cell
+    observation model is used; these plug-in scores are not calibrated confidence
+    in normal identity. Balanced gains and genome doubling
     remain possible, so balance does not establish copy neutrality or normal identity.
     Returns (row positions, summary dict)."""
     Ak, Dk = alleles.pool(np.ones((alleles.A.shape[0], 1)))
@@ -524,6 +545,6 @@ def balanced_cells(alleles: SpecimenAlleles, min_theta=0.15, posterior=0.99):
     idx = np.concatenate([np.arange(r['first_snp'], r['last_snp'] + 1) for r in runs])
     b = 0.5 + alleles.params.cell_shrink * (B[0, idx] - 0.5)
     A, D = alleles.A[:, idx], alleles.D[:, idx]
-    llr = np.asarray(A @ np.log(b / 0.5) + (D - A) @ np.log((1 - b) / 0.5)).ravel()
+    llr = balance_loglik_ratio(A, D, b, alleles.params.cell_kappa)
     p_bal = 1.0 / (1.0 + np.exp(np.clip(llr, -50, 50)))
     return np.flatnonzero(p_bal >= posterior), dict(runs=len(runs), snps=int(len(idx)))

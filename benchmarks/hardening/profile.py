@@ -14,9 +14,12 @@ evidence. Few reference bootstrap refits cannot establish nominal CI coverage.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from fractions import Fraction
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -73,13 +76,31 @@ def loss_threshold(scores, neutral, calibration_columns, fpr=FPR):
     idx = np.asarray(calibration_columns, int)
     if np.any((idx < 0) | (idx >= scores.shape[1])):
         raise ValueError('calibration column outside matrix')
-    values, weights = [], []
-    for j in idx:
+    values, multiplicities = [], []
+    for j, multiplicity in Counter(idx).items():
         v = scores[:, j][neutral[:, j] & np.isfinite(scores[:, j])]
         if len(v):
-            values.append(v)
-            weights.append(np.full(len(v), 1.0 / len(v)))
-    return weighted_quantile(np.concatenate(values), np.concatenate(weights), fpr) if values else np.nan
+            values.append(np.sort(v))
+            multiplicities.append(multiplicity)
+    if not values:
+        return np.nan
+    # Equal patient mass is rational. Floating cumulative sums can move a
+    # quantile across an exact boundary merely by duplicating identical windows.
+    denominator = math.lcm(*(len(v) for v in values))
+    weights = [int(n) * (denominator // len(v)) for n, v in zip(multiplicities, values)]
+    q = Fraction(str(fpr))  # The declared decimal probability, e.g. 0.05 = 1/20.
+    target = q.numerator * denominator * sum(multiplicities)
+    support = np.unique(np.concatenate(values))
+    lo, hi = 0, len(support) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        mass = sum(w * int(np.searchsorted(v, support[mid], side='right'))
+                   for w, v in zip(weights, values))
+        if mass * q.denominator >= target:
+            hi = mid
+        else:
+            lo = mid + 1
+    return float(support[lo])
 
 
 def score_loss(scores, loss, neutral, common, threshold, negative=None):

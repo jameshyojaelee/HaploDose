@@ -10,7 +10,7 @@ DNA inputs swapped in (subarm.py otherwise identical: 10 Mb gene-anchored window
 percentile of DNA-neutral windows per group):
   gene positions  hg38 (Ensembl 112, the positions.tsv table); DepMap 24Q4 segments are hg38, so no liftover
   arms           hg38 UCSC cytoBand (md5 6677dd50caf19b0c3626b99ce67ca073, same source as centromeres_hg38.tsv)
-  segments       DepMap ABSOLUTE SegmentAbsoluteCN; ploidy = length-weighted mean total CN over chr1-22
+  segments       DepMap PureCN SegmentAbsoluteCN; ploidy = length-weighted mean total CN over chr1-22
 Tie-break: random (seeded jitter on hd_dose and infercnvpy), so every method sits at the same realised FPR.
 
 Primary (fixed before any run): focal-loss recall at 5% FPR per line, hd_dose vs naive and hd_dose vs infercnvpy,
@@ -83,7 +83,7 @@ def main(out, inp, icnv):
     subarm.hg19_genes = lambda: pos
     subarm.hg19_arms = hg38_arms
     subarm.absolute = lambda: (tab, seg)
-    subarm.GTF37 = 'hg38 positions (Ensembl 112), no liftover; DepMap 24Q4 ABSOLUTE segments'
+    subarm.GTF37 = 'hg38 positions (Ensembl 112), no liftover; DepMap 24Q4 PureCN absolute segments'
     groups = sorted(d.name for d in inp.iterdir() if (d / 'counts.tsv').exists())
     sys.argv = ['subarm.py', str(out), '--tiebreak', 'random', '--input-scale', 'raw_counts'] + [f'{t}={inp / t}:{icnv / t}' for t in groups]
     subarm.main()

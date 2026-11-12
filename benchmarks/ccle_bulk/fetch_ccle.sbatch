@@ -8,7 +8,7 @@
 #SBATCH --chdir=/gpfs/commons/home/jameslee/Haplodose
 #SBATCH --output=/gpfs/commons/home/jameslee/Haplodose/logs/%x_%j.out
 # DepMap 24Q4 Public (figshare article 27993248) files for the CCLE bulk benchmark (prespecified SOTA claim 3):
-# RNA-SeQC gene counts, ABSOLUTE CN segments (TCN, ploidy), relative CN segments, profile/model maps.
+# RNA-SeQC gene counts, PureCN absolute CN segments, relative CN segments, profile/model maps.
 # md5 checked against figshare computed_md5; manifest.tsv records url, bytes, md5, time.
 set -euo pipefail
 D=data/external/depmap_24q4_ccle

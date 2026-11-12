@@ -1,6 +1,7 @@
 """Independent mass, variance and effective-support invariants for weighted pools."""
 import numpy as np
 import pytest
+from scipy import sparse
 from haplodose.clones import Rows, SpecimenModel
 
 
@@ -50,3 +51,40 @@ def test_zero_confidence_abstains_and_support_is_scale_invariant():
     assert not result['testable'] and result['segments']==[] and result['effective_cells']==[0.,0.]
     for bad in [np.ones(7),np.full(8,-1.),np.full(8,np.nan)]:
         with pytest.raises(ValueError):m.matched_differences(labels,[(0,1)],cell_weights=bad)
+
+
+def test_coarse_depth_balance_detects_within_stratum_shift():
+    model = SpecimenModel.__new__(SpecimenModel)
+    model.rows = Rows(np.ones((16, 2)), np.arange(16))
+    model.L = np.full(16, 2.)
+    model.test_fold = None
+    model.differences = lambda *args, **kwargs: [dict(testable=True)]
+    labels = np.repeat([0, 1], 8)
+    a = np.arange(8) / 4
+    for shift in [0., .125]:
+        model.x = np.r_[a, a + shift]
+        result, = model.matched_differences(labels, [(0, 1)], report_depth_balance=True)
+        # Each stratum has one cell per group. The optimal one-dimensional
+        # transport pairs equal ranks, moving every unit of mass by shift.
+        assert result['weighted_log_depth_wasserstein'] == shift
+
+
+def test_gene_veto_distinguishes_zero_library_from_measured_discordance():
+    model = SpecimenModel.__new__(SpecimenModel)
+    model.J = 2
+    model.test_mask = np.ones(2, dtype=bool)
+    model.alleles = None
+    model.log = []
+    labels = np.repeat([0, 1], 10)
+    bins = np.repeat([0, 1], 8)
+    high = np.repeat([20, 2], 8)
+    low = np.repeat([2, 20], 8)
+    segment = dict(first_bin=0, last_bin=0, direction='higher')
+
+    for group_a, expected in [(high, True), (np.zeros(16, dtype=int), None), (low, False)]:
+        counts = sparse.csr_matrix(np.vstack([np.tile(group_a, (10, 1)), np.tile(low, (10, 1))]))
+        model.genes = np.arange(20), counts, bins
+        assert model.gene_consistent(segment, labels, 0, 1) is expected
+        assert model.supported([segment], None, None, None, None, labels, 0, 1) == (
+            [] if expected is False else [segment])
+    assert [event['action'] for event in model.log] == ['gene_veto_uninformative', 'gene_veto']

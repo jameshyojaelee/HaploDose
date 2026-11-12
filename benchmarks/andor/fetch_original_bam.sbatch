@@ -12,10 +12,11 @@
 # header SM = barcode) and CB tag. The SRA alignment load keeps the cell read group only for a few
 # thousand reads per cell; the rest carry the 8-mer sample index as spot group (checked on SNU-638).
 # Same read filter as fetch_bins.sbatch: flag 0x42 set, 0xF04 clear, MAPQ >= 30, one count per fragment.
-# Usage: sbatch -J andor_bam_<line> fetch_original_bam.sbatch LINE URL MD5
+# Usage: sbatch -J andor_bam_<line> fetch_original_bam.sbatch LINE URL MD5 [OUT_BINS_DIR]
+# Use a fresh versioned OUT_BINS_DIR for corrected counts; existing bins are never replaced.
 set -euo pipefail
 LINE=$1 URL=$2 MD5=$3
-D=data/external/andor2020_scdna/bins_original_bam
+D=${4:-data/external/andor2020_scdna/bins_original_bam}
 mkdir -p $D
 OUT=$D/${LINE}.tsv.gz
 [[ ! -e $OUT ]] || { echo "exists: $OUT"; exit 1; }
@@ -25,7 +26,7 @@ curl -sS --retry 5 "$URL" \
   | samtools view -h -f 0x42 -F 0xF04 -q 30 - \
   | awk -F'\t' -v OFS='\t' -v H=$D/${LINE}.rg.txt '/^@RG/ {print > H; next} /^@/ {next}
         {rg=""; for (i=12; i<=NF; i++) if (substr($i,1,5)=="RG:Z:") {rg=substr($i,6); break}
-         if (rg=="") next; c[rg OFS $3 OFS int($4/500000)]++; n++}
+         if (rg=="") next; c[rg OFS $3 OFS int(($4-1)/500000)]++; n++}
         END {for (k in c) print k, c[k]; print "#fragments", n > "/dev/stderr"}' \
   | gzip -c > $OUT.tmp
 sleep 5
